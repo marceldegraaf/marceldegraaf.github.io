@@ -3,7 +3,7 @@
 @import url('../fonts/nymphette.css');
 
 body {
-  background: #dfdccc url('../backdrop.png') 0px 0px repeat;
+  background: #dfdccc url('/images/backdrop.png') 0px 0px repeat;
   margin: 0;
   padding: 0;
 }
@@ -59,7 +59,7 @@ div#footer {
   -moz-box-shadow: inset 0px 0px 5px #000;
   -webkit-box-shadow: inset 0px 0px 5px #000;
   box-shadow: inset 0px 0px 5px #000;
-  background: #000 url('../me.jpg') 0px 0px no-repeat;
+  background: #000 url('/images/me.jpg') 0px 0px no-repeat;
   width: 200px;
   height: 200px;
 }
