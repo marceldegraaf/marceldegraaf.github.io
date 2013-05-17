@@ -1,0 +1,15 @@
+#!/usr/bin/env ruby
+
+puts "Building site..."
+system %{ jekyll build --destination _deploy }
+
+Dir.chdir "_deploy"
+
+puts "Commiting changes..."
+system %{ git add -A }
+system %{ git commit -m "Updated website" }
+system %{ git push origin master }
+
+Dir.chdir ".."
+
+puts "All done"
