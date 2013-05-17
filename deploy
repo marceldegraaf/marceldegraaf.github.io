@@ -5,6 +5,8 @@ system %{ jekyll build --destination _deploy }
 
 Dir.chdir "_deploy"
 
+system %{ rm deploy }
+
 puts "Commiting changes..."
 system %{ git add -A }
 system %{ git commit -m "Updated website" }
