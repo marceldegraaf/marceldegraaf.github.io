@@ -103,15 +103,11 @@ code
   opacity: 0
   filter: alpha(opacity=0)
 
-#intro
-  height: $sidebar_backdrop_height - ( $photo_height / 2 )
-
 #posts
-  position: absolute
-  top: $sidebar_backdrop_height
   list-style: none
-  margin: 20px 0px
+  margin: 80px 0px
   padding: 0px
+  padding-right: 50px
 
   li
     margin-bottom: 15px
@@ -140,3 +136,30 @@ code
     padding: 0px
     border: 0px
     background: transparent
+
+
+@media (max-width: 767px)
+  h3
+    font-size: 16px
+
+  #intro
+    text-align: justify
+
+    h2
+      text-align: center
+
+  #sidebar
+    float: none
+    background: transparent
+    width: auto
+    height: auto
+    padding-top: 20px
+
+    #photo
+      margin: 0 auto
+      zoom: 0.7
+
+  #content-area
+    padding-left: 50px !important
+
+@media screen and (max-width: 480px)
