@@ -1,7 +1,7 @@
 #!/usr/bin/env ruby
 
 puts "Building site..."
-system %{ jekyll build --destination _deploy }
+system %{ bundle exec jekyll build --destination _deploy }
 
 Dir.chdir "_deploy"
 
