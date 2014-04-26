@@ -11,6 +11,9 @@ field.
 Today I want to walk you through my experiments with CoreOS, confd, etcd, fleet, and CloudFormation. I'm very excited
 about these tools and I hope to share that excitement with you :-).
 
+All the code for these experiments is in [this repo](https://github.com/marceldegraaf/coreos-blogpost-code). If you want to comment on this
+blog post, or you run into issues with the walkthrough below, please [email me](mailto:mail@marceldegraaf.net) or [ping me](https://twitter.com/marceldegraaf) on Twitter.
+
 ### Introduction
 
 So, what are CoreOS, confd, etcd, fleet, and CloudFormation? Let me introduce them to you real quick:
