@@ -375,4 +375,5 @@ be the next big step in setting up highly available and scalable web application
 
 This would also be a good place to mention [Flynn](https://flynn.io) and [Deis](http://deis.io), two projects that aim to solve "the devops issue" in ways similar to what you've seen in this post.
 
-These are interesting times!
+Next up for me is trying out Mozilla's [heka](http://hekad.readthedocs.org/en/latest/index.html) for aggregated log collection, and Heroku's [buildpacks](https://devcenter.heroku.com/articles/buildpacks)
+to compile and run a full-blown web application in a generic Docker container. I might even blog about this! ;-).
