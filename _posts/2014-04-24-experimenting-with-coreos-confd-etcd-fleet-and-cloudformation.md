@@ -14,6 +14,13 @@ about these tools and I hope to share that excitement with you :-).
 All the code for these experiments is in [this repo](https://github.com/marceldegraaf/coreos-blogpost-code). If you want to comment on this
 blog post, or you run into issues with the walkthrough below, please [email me](mailto:mail@marceldegraaf.net) or [ping me](https://twitter.com/marceldegraaf) on Twitter.
 
+#### Updates
+
+2014-04-30 – thanks to [@brianhicks](https://twitter.com/brianhicks/status/461528976070963200) and [bacongobbler](https://news.ycombinator.com/item?id=7674287) I've replaced
+all the grep/awk voodoo to get the host IP with a simple solution based on environment variables from `/etc/environment`. The code samples below have been updated, along with the
+systemd unit files in [the repository](https://github.com/marceldegraaf/coreos-blogpost-code).
+
+
 ### Introduction
 
 So, what are CoreOS, confd, etcd, fleet, and CloudFormation? Let me introduce them to you real quick:
@@ -138,7 +145,8 @@ After=docker.service
 Requires=docker.service
 
 [Service]
-ExecStartPre=/bin/bash -c "/usr/bin/etcdctl set /test/%m $(fleetctl list-machines | grep $(bootctl status | grep 'Boot ID' | awk '{print substr($3,0,8)}') | awk '{print $2}')"
+EnvironmentFile=/etc/environment
+ExecStartPre=/bin/bash -c "/usr/bin/etcdctl set /test/%m $COREOS_PUBLIC_IPV4"
 ExecStart=/usr/bin/docker run --name test --rm busybox /bin/sh -c "while true; do echo Hello World; sleep 1; done"
 ExecStop=/usr/bin/etcdctl rm /test/%m
 ExecStop=/usr/bin/docker kill test
@@ -152,10 +160,10 @@ Let's go through that line by line:
 4. Tells systemd that this unit needs `docker.service` to operate properly
 5. An empty line ;-)
 6. The `[Service]` header
-7. `ExecStartPre` runs before the service is started. This line does some magic to retrieve the external IP from
-the host machine, from `fleetctl`. However, the relevant code is: `/usr/bin/etcdctl set /test/%m`, where I set a
-key in etcd. In systemd, `%m` gets expanded to the unique machine ID. The result of this operation is that there
-is a key in etcd called `/test/<machine-id>` with the value `<machine-ip`. This is useful for the Sinatra and nginx
+7. Reads the file `/etc/environment` and exposes its environment variables to the current unit file
+7. `ExecStartPre` runs before the service is started. The line `/usr/bin/etcdctl set /test/%m $COREOS_PUBLIC_IPV4` creates
+a key in etcd with the name of the unique machine ID (expanded from `%m` in systemd) and the machine's public IP as value
+(this variable comes from the `/etc/environment` file). This key/value pair in etcd is useful for the Sinatra and nginx
 part below.
 8. `ExecStart` starts the actual service. This is a vanilla Docker command.
 9. The first `ExecStop` deregisters the `/test/<machine-id>` key from etcd
@@ -192,10 +200,10 @@ To see the status of the service, call `fleetctl status hello`:
 ● hello.service - Hello World
    Loaded: loaded (/run/systemd/system/hello.service; static)
    Active: active (running) since Fri 2014-04-25 09:49:33 UTC; 1min 57s ago
-  Process: 7546 ExecStartPre=/bin/bash -c /usr/bin/etcdctl set /test/%m $(fleetctl list-machines | grep $(bootctl status | grep 'Boot ID' | awk '{print substr($3,0,8)}') | awk '{print $2}') (code=exited, status=0/SUCCESS)
- Main PID: 7565 (docker)
-   CGroup: /system.slice/hello.service
-           └─7565 /usr/bin/docker run --name test --rm busybox /bin/sh -c while true; do echo Hello World; sleep 1; done
+  Process: 7035 ExecStartPre=/bin/bash -c /usr/bin/etcdctl set /test/%m $COREOS_PUBLIC_IPV4 (code=exited, status=0/SUCCESS)
+ Main PID: 7041 (docker)
+   CGroup: /system.slice/test.service
+           └─7041 /usr/bin/docker run --name test --rm busybox /bin/sh -c while true; do echo Hello World; sleep 1; done
 {% endhighlight %}
 
 Now that we've got a simple "Hello World" application running with etcd (de)registration, it's time to move on to
@@ -219,9 +227,10 @@ This is the service definition. I've saved it to a file called `sinatra.service`
 Description=sinatra
 
 [Service]
+EnvironmentFile=/etc/environment
 ExecStartPre=/usr/bin/docker pull marceldegraaf/sinatra
 ExecStart=/usr/bin/docker run --name sinatra-%i --rm -p %i:5000 -e PORT=5000 marceldegraaf/sinatra
-ExecStartPost=/bin/bash -c "/usr/bin/etcdctl set /app/server/%i $(fleetctl list-machines | grep $(bootctl status | grep 'Boot ID' | awk '{print substr($3,0,8)}') | awk '{print $2}'):%i"
+ExecStartPost=/bin/bash -c "/usr/bin/etcdctl set /app/server/%i $COREOS_PUBLIC_IPV4:%i"
 ExecStop=/usr/bin/docker kill sinatra-%i
 ExecStopPost=/usr/bin/etcdctl rm /app/server/%i
 
@@ -283,19 +292,16 @@ Lets start with creating a simple nginx service that we'll start with `fleetctl`
 Description=nginx
 
 [Service]
+EnvironmentFile=/etc/environment
 ExecStartPre=/usr/bin/docker pull marceldegraaf/nginx
-ExecStart=/bin/bash -c "/usr/bin/docker run --rm --name nginx -p 80:80 -e HOST_IP=$(ip address show docker0 | grep 'inet ' | awk '{gsub(/\/[0-9]{2}/, \"\"); print $2}') marceldegraaf/nginx"
+ExecStart=/bin/bash -c "/usr/bin/docker run --rm --name nginx -p 80:80 -e HOST_IP=$COREOS_PUBLIC_IPV4 marceldegraaf/nginx"
 ExecStop=/usr/bin/docker kill nginx
 
 [X-Fleet]
 X-Conflicts=nginx.service
 {% endhighlight %}
 
-Again we do some shell magic to set the `$HOST_IP` variable. We basically take the IP address of the `docker0` interface, as this is where the Docker
-container can reach etcd. Normally you would be able to use the IP address `172.17.42.1` to reach the Docker host from within a container, but for some
-reason this didn't work with Vagrant on my machine while testing. The solution above should work in any environment.
-
-As you can see the container uses my `marceldegraaf/nginx` Docker repository. The source files for that repository are here. Before I walk you through
+As you can see the container uses my `marceldegraaf/nginx` Docker repository. The source files for that repository are [here](https://github.com/marceldegraaf/coreos-blogpost-code/tree/master/nginx). Before I walk you through
 how the automated service discovery works, let's start the nginx service:
 
 {% highlight bash %}
