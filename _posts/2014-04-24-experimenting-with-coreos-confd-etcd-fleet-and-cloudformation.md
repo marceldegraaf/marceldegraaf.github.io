@@ -23,7 +23,7 @@ So, what are CoreOS, confd, etcd, fleet, and CloudFormation? Let me introduce th
   process running on a CoreOS server should be running in a Docker container. CoreOS comes with Docker and etcd
   pre-installed.
 
-- [**Docker**](https://docker.io/) is an abstraction layer on top of [LXC](http://en.wikipedia.org/wiki/LXC). It
+- [**Docker**](https://docker.io/) is a platform to create light-weight, stand-alone, containers from any application. It
   allows you to run processes in a pseudo-VM that boots extremely fast (under 1 second) and isolates all its
   resources.
 
