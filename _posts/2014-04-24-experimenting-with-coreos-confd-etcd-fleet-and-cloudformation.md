@@ -146,7 +146,7 @@ Requires=docker.service
 
 [Service]
 EnvironmentFile=/etc/environment
-ExecStartPre=/bin/bash -c "/usr/bin/etcdctl set /test/%m $COREOS_PUBLIC_IPV4"
+ExecStartPre=/usr/bin/etcdctl set /test/%m ${COREOS_PUBLIC_IPV4}
 ExecStart=/usr/bin/docker run --name test --rm busybox /bin/sh -c "while true; do echo Hello World; sleep 1; done"
 ExecStop=/usr/bin/etcdctl rm /test/%m
 ExecStop=/usr/bin/docker kill test
@@ -161,7 +161,7 @@ Let's go through that line by line:
 5. An empty line ;-)
 6. The `[Service]` header
 7. Reads the file `/etc/environment` and exposes its environment variables to the current unit file
-7. `ExecStartPre` runs before the service is started. The line `/usr/bin/etcdctl set /test/%m $COREOS_PUBLIC_IPV4` creates
+7. `ExecStartPre` runs before the service is started. The line `/usr/bin/etcdctl set /test/%m ${COREOS_PUBLIC_IPV4}` creates
 a key in etcd with the name of the unique machine ID (expanded from `%m` in systemd) and the machine's public IP as value
 (this variable comes from the `/etc/environment` file). This key/value pair in etcd is useful for the Sinatra and nginx
 part below.
@@ -200,7 +200,7 @@ To see the status of the service, call `fleetctl status hello`:
 ● hello.service - Hello World
    Loaded: loaded (/run/systemd/system/hello.service; static)
    Active: active (running) since Fri 2014-04-25 09:49:33 UTC; 1min 57s ago
-  Process: 7035 ExecStartPre=/bin/bash -c /usr/bin/etcdctl set /test/%m $COREOS_PUBLIC_IPV4 (code=exited, status=0/SUCCESS)
+  Process: 7035 ExecStartPre=/usr/bin/etcdctl set /test/%m ${COREOS_PUBLIC_IPV4} (code=exited, status=0/SUCCESS)
  Main PID: 7041 (docker)
    CGroup: /system.slice/test.service
            └─7041 /usr/bin/docker run --name test --rm busybox /bin/sh -c while true; do echo Hello World; sleep 1; done
@@ -230,7 +230,7 @@ Description=sinatra
 EnvironmentFile=/etc/environment
 ExecStartPre=/usr/bin/docker pull marceldegraaf/sinatra
 ExecStart=/usr/bin/docker run --name sinatra-%i --rm -p %i:5000 -e PORT=5000 marceldegraaf/sinatra
-ExecStartPost=/bin/bash -c "/usr/bin/etcdctl set /app/server/%i $COREOS_PUBLIC_IPV4:%i"
+ExecStartPost=/usr/bin/etcdctl set /app/server/%i ${COREOS_PUBLIC_IPV4}:%i
 ExecStop=/usr/bin/docker kill sinatra-%i
 ExecStopPost=/usr/bin/etcdctl rm /app/server/%i
 
@@ -294,7 +294,7 @@ Description=nginx
 [Service]
 EnvironmentFile=/etc/environment
 ExecStartPre=/usr/bin/docker pull marceldegraaf/nginx
-ExecStart=/bin/bash -c "/usr/bin/docker run --rm --name nginx -p 80:80 -e HOST_IP=$COREOS_PUBLIC_IPV4 marceldegraaf/nginx"
+ExecStart=/usr/bin/docker run --rm --name nginx -p 80:80 -e HOST_IP=${COREOS_PUBLIC_IPV4} marceldegraaf/nginx
 ExecStop=/usr/bin/docker kill nginx
 
 [X-Fleet]
