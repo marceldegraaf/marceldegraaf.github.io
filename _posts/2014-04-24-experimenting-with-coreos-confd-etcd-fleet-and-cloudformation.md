@@ -20,6 +20,8 @@ blog post, or you run into issues with the walkthrough below, please [email me](
 all the grep/awk voodoo to get the host IP with a simple solution based on environment variables from `/etc/environment`. The code samples below have been updated, along with the
 systemd unit files in [the repository](https://github.com/marceldegraaf/coreos-blogpost-code).
 
+2014-05-01 – thanks to [@brianhicks](https://github.com/marceldegraaf/coreos-blogpost-code/commit/9460d99a7bedfb517d94084f35539052cb550a62#commitcomment-6174324) I've removed the
+calls to `/bin/bash` in the systemd unit files, and now just call the required process right away. The `$COREOS_PUBLIC_IPV4` variable gets substituted in with `${...}`.
 
 ### Introduction
 
