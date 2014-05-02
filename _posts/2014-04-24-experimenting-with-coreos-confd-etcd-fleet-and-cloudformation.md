@@ -23,6 +23,9 @@ systemd unit files in [the repository](https://github.com/marceldegraaf/coreos-b
 2014-05-01 – thanks to [@brianhicks](https://github.com/marceldegraaf/coreos-blogpost-code/commit/9460d99a7bedfb517d94084f35539052cb550a62#commitcomment-6174324) I've removed the
 calls to `/bin/bash` in the systemd unit files, and now just call the required process right away. The `$COREOS_PUBLIC_IPV4` variable gets substituted in with `${...}`.
 
+2014-05-02 – updated the `fleetctl submit` commands to include `start` as well. When I started writing this article I was using an alpha version of fleetctl that automatically starts
+submitted units. The article has been updated to reflect the commands that work with the currently stable version of fleetctl (0.2.0).
+
 ### Introduction
 
 So, what are CoreOS, confd, etcd, fleet, and CloudFormation? Let me introduce them to you real quick:
@@ -171,10 +174,11 @@ part below.
 9. The first `ExecStop` deregisters the `/test/<machine-id>` key from etcd
 10. The second `ExecStop` kills the actual Docker container.
 
-To run this service, save it to a file called `hello.service` and submit it to your fleet with `fleetctl`:
+To run this service, save it to a file called `hello.service`, submit it to your fleet with `fleetctl` and start it:
 
 {% highlight bash %}
 fleetctl submit hello.service
+fleetctl start hello.service
 {% endhighlight %}
 
 If you now call `fleetctl list-units`, you should see your service running:
@@ -256,7 +260,10 @@ To start these services in your cluster, first submit them with `fleetctl`:
 
 {% highlight bash %}
 fleetctl submit sinatra@5000.service
+fleetctl start sinatra@5000.service
+
 fleetctl submit sinatra@5001.service
+fleetctl start sinatra@5001.service
 {% endhighlight %}
 
 You should now see your Sinatra services running with `fleetctl list-units`.
@@ -308,6 +315,7 @@ how the automated service discovery works, let's start the nginx service:
 
 {% highlight bash %}
 fleetctl submit nginx.service
+fleetctl start nginx.service
 {% endhighlight %}
 
 The magic happens in `boot.sh`. This is where confd comes into play. When the container boots, it runs `boot.sh`, which does some
