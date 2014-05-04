@@ -11,20 +11,22 @@ field.
 Today I want to walk you through my experiments with CoreOS, confd, etcd, fleet, and CloudFormation. I'm very excited
 about these tools and I hope to share that excitement with you :-).
 
-All the code for these experiments is in [this repo](https://github.com/marceldegraaf/coreos-blogpost-code). If you want to comment on this
-blog post, or you run into issues with the walkthrough below, please [email me](mailto:mail@marceldegraaf.net) or [ping me](https://twitter.com/marceldegraaf) on Twitter.
+All the code for these experiments is in [this repo](https://github.com/marceldegraaf/blog-coreos-1). If you want to comment on this
+article, or you run into issues with the walkthrough below, please [email me](mailto:mail@marceldegraaf.net) or [ping me](https://twitter.com/marceldegraaf) on Twitter.
 
 #### Updates
 
 2014-04-30 – thanks to [@brianhicks](https://twitter.com/brianhicks/status/461528976070963200) and [bacongobbler](https://news.ycombinator.com/item?id=7674287) I've replaced
 all the grep/awk voodoo to get the host IP with a simple solution based on environment variables from `/etc/environment`. The code samples below have been updated, along with the
-systemd unit files in [the repository](https://github.com/marceldegraaf/coreos-blogpost-code).
+systemd unit files in [the repository](https://github.com/marceldegraaf/blog-coreos-1).
 
-2014-05-01 – thanks to [@brianhicks](https://github.com/marceldegraaf/coreos-blogpost-code/commit/9460d99a7bedfb517d94084f35539052cb550a62#commitcomment-6174324) I've removed the
+2014-05-01 – thanks to [@brianhicks](https://github.com/marceldegraaf/blog-coreos-1/commit/9460d99a7bedfb517d94084f35539052cb550a62#commitcomment-6174324) I've removed the
 calls to `/bin/bash` in the systemd unit files, and now just call the required process right away. The `$COREOS_PUBLIC_IPV4` variable gets substituted in with `${...}`.
 
 2014-05-02 – updated the `fleetctl submit` commands to include `start` as well. When I started writing this article I was using an alpha version of fleetctl that automatically starts
 submitted units. The article has been updated to reflect the commands that work with the currently stable version of fleetctl (0.2.0).
+
+2014-05-03 – part 2 of this article is up: [CoreOS follow-up: Sinatra, Logstash, Elasticsearch, and Kibana](http://marceldegraaf.net/2014/05/05/coreos-follow-up-sinatra-logstash-elasticsearch-kibana.html)
 
 ### Introduction
 
@@ -68,7 +70,7 @@ sturdy base environment that could be used to host applications of any kind, and
 
 ### Following along
 
-For the rest of this blog post I assume you've got access to the `docker` and `fleetctl` commands, either on a
+For the rest of this article I assume you've got access to the `docker` and `fleetctl` commands, either on a
 (Vagrant) virtual machine or on your workstation. Follow the respective guides with installation instructions for
 your platform, and make sure you have an AWS account. Then return here to follow along with me :-).
 
@@ -78,7 +80,7 @@ Let's start with creating a CloudFormation stack, consisting of a few EC2 instan
 gives the instances access to each others **etcd** daemons. This security group will also give you access to each
 of the instances via SSH.
 
-I've used [this stack definition](https://github.com/marceldegraaf/coreos-blogpost-code/blob/master/stack.yml). As you can see it's in YAML format for readability. The JSON version is [here](https://github.com/marceldegraaf/coreos-blogpost-code/blob/master/stack.json).
+I've used [this stack definition](https://github.com/marceldegraaf/blog-coreos-1/blob/master/stack.yml). As you can see it's in YAML format for readability. The JSON version is [here](https://github.com/marceldegraaf/blog-coreos-1/blob/master/stack.json).
 If you update the YAML version of the stack, use this shell command to parse it into JSON, assuming you have
 Ruby installed and your YAML file is called `stack.yml`:
 
@@ -310,7 +312,7 @@ ExecStop=/usr/bin/docker kill nginx
 X-Conflicts=nginx.service
 {% endhighlight %}
 
-As you can see the container uses my `marceldegraaf/nginx` Docker repository. The source files for that repository are [here](https://github.com/marceldegraaf/coreos-blogpost-code/tree/master/nginx). Before I walk you through
+As you can see the container uses my `marceldegraaf/nginx` Docker repository. The source files for that repository are [here](https://github.com/marceldegraaf/blog-coreos-1/tree/master/nginx). Before I walk you through
 how the automated service discovery works, let's start the nginx service:
 
 {% highlight bash %}
@@ -388,7 +390,7 @@ sinatra@5010.service  loaded  loaded  active  running  sinatra  e70d20cf.../10.8
 
 ### Conclusion
 
-First of all: congratulations for making it this far! This was by far the longest blog post I've ever written, and researching all this stuff cost me considerably more
+First of all: congratulations for making it this far! This was by far the longest article I've ever written, and researching all this stuff cost me considerably more
 time than I had expected. It was worth it though, because I'm extremely impressed by CoreOS and the tooling ecosystem around it. I wouldn't be surprised if this is going to
 be the next big step in setting up highly available and scalable web applications.
 
