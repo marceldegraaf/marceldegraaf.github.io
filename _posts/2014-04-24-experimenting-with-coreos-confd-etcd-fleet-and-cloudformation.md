@@ -28,6 +28,8 @@ submitted units. The article has been updated to reflect the commands that work 
 
 2014-05-03 – part 2 of this article is up: [CoreOS follow-up: Sinatra, Logstash, Elasticsearch, and Kibana](http://marceldegraaf.net/2014/05/05/coreos-follow-up-sinatra-logstash-elasticsearch-kibana.html)
 
+2014-05-12 – added some remarks and added `.service` suffixes to inline `fleetctl` commands. Thanks to [Scott Wilson](https://twitter.com/scottynomad).
+
 ### Introduction
 
 So, what are CoreOS, confd, etcd, fleet, and CloudFormation? Let me introduce them to you real quick:
@@ -125,6 +127,12 @@ export FLEETCTL_TUNNEL=<ip-of-a-cluster-instance>
 It doesn't matter which instance you use as the other end of your SSH tunnel, as long as you use the EC2 instance's
 public IP address. Of course the IP address in your SSH config must be the same as what you export in the environment variable.
 
+Also, make sure to add your private key to ssh-agent, to make sure the ssh commands work:
+
+{% highlight bash %}
+ssh-add ~/.ssh/your_aws_private_key.pem
+{% endhighlight %}
+
 Once you've done this, the following command:
 
 {% highlight bash %}
@@ -171,7 +179,7 @@ Let's go through that line by line:
 7. `ExecStartPre` runs before the service is started. The line `/usr/bin/etcdctl set /test/%m ${COREOS_PUBLIC_IPV4}` creates
 a key in etcd with the name of the unique machine ID (expanded from `%m` in systemd) and the machine's public IP as value
 (this variable comes from the `/etc/environment` file). This key/value pair in etcd is useful for the Sinatra and nginx
-part below.
+part below. **Note**: Make sure to replace this with `COREOS_PRIVATE_IPV4` if you're running in a VPC on EC2.
 8. `ExecStart` starts the actual service. This is a vanilla Docker command.
 9. The first `ExecStop` deregisters the `/test/<machine-id>` key from etcd
 10. The second `ExecStop` kills the actual Docker container.
@@ -190,7 +198,7 @@ UNIT            STATE   LOAD    ACTIVE  SUB     DESC        MACHINE
 hello.service   loaded  loaded  active  running Hello World a2ada91b.../172.17.8.102
 {% endhighlight %}
 
-To see the output of the service, call `fleetctl journal hello`:
+To see the output of the service, call `fleetctl journal hello.service`:
 
 {% highlight bash %}
 -- Logs begin at Thu 2014-04-24 13:18:12 UTC, end at Fri 2014-04-25 09:50:50 UTC. --
@@ -202,7 +210,7 @@ Apr 25 09:50:43 core-02 docker[7565]: Hello World
 {% endhighlight %}
 
 Note that `journal` accepts a `-f` flag, which streams the output of the service to your terminal in real time.
-To see the status of the service, call `fleetctl status hello`:
+To see the status of the service, call `fleetctl status hello.service`:
 
 {% highlight bash %}
 ● hello.service - Hello World
@@ -289,7 +297,7 @@ in etcd. `etcdctl ls --recursive /app/server` should list your two ports:
 /app/server/5001
 {% endhighlight %}
 
-If you were to kill one of the Sinatra services (with `fleetctl destroy sinatra@<port>`) you would see that one entry
+If you were to kill one of the Sinatra services (with `fleetctl destroy sinatra@<port>.service`) you would see that one entry
 disappears from etcd. If you submit it again, it sould re-register itself. Quite neat!
 
 The next step is to add Nginx to the mix, to act as a dynamic proxy in front of these Sinatra services.
@@ -361,8 +369,8 @@ and reload nginx.
 
 Now that you've followed all these steps, you should have two Sinatra and one nginx service running on your CoreOS cluster. If you SSH into the machine that runs
 the nginx container, you should be able to reach the Sinatra containers through nginx with a simple `curl localhost`. This should output `Hello World!`. If you run
-`fleetctl journal -f sinatra@5000` and `fleetctl journal -f sinatra@5001` in two separate terminals, you should see the requests throuh nginx coming in. You should also
-be able to stop any of the Sinatra services with `fleetctl destroy sinatra@<port>`, and still be able to perform requests through the nginx container on the remaining Sinatra
+`fleetctl journal -f sinatra@5000.service` and `fleetctl journal -f sinatra@5001.service` in two separate terminals, you should see the requests throuh nginx coming in. You should also
+be able to stop any of the Sinatra services with `fleetctl destroy sinatra@<port>.service`, and still be able to perform requests through the nginx container on the remaining Sinatra
 service. Of course this will stop working once you destroy both of the running Sinatra services.
 
 You should also be able to connect to the nginx service from within your normal web browser, using the hostname of the ELB that was created with your CloudFormation run. To
