@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+    <title>Ember.js and Bootstrap navbar - how to mark an li as active</title>
+    <meta name="viewport" content="width=device-width">
+    <link rel="stylesheet" href="/assets/css/main.css">
+
+    <script type="text/javascript">
+      var _gaq = _gaq || [];
+      _gaq.push(['_setAccount', 'UA-116239-4']);
+      _gaq.push(['_trackPageview']);
+
+      (function() {
+        var ga = document.createElement('script'); ga.type = 'text/javascript'; ga.async = true;
+        ga.src = ('https:' == document.location.protocol ? 'https://ssl' : 'http://www') + '.google-analytics.com/ga.js';
+        var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(ga, s);
+      })();
+    </script>
+  </head>
+
+  <body id="single-post">
+    <div id="sidebar">
+  <div id="photo" class="circular">
+    <img src="/assets/img/me.jpg" alt="Marcel de Graaf" />
+  </div>
+
+  <h1>Marcel de Graaf</h1>
+  <p>Ops Engineer at <a href="https://yourkarma.com">Karma</a>. Drummer. Music enthusiast.</p>
+
+</div>
+
+
+    <div id="content-area">
+      <h2>Ember.js and Bootstrap navbar - how to mark an li as active</h2>
+
+      <p>I&#8217;ve been experimenting with Ember.js quite a bit over the last few weeks and so far it has been a very interesting experience. The documentation seems to have improved lately but some things still require a bit of Google-fu to get right.</p>
+
+<p>One of the things that took me while to figure out was the right way to implement a Bootstrap navbar with Ember. The thing is: Ember has a nice <code>linkTo</code> helper that renders an <code>a</code> tag. It even automatically gets an <code>active</code> class when clicked. However, unfortunately, Bootstrap&#8217;s navbar requires the encapsulating <code>li</code> (around the <code>a</code> tag) to get the <code>active</code> class.</p>
+
+<p>The <a href='http://stackoverflow.com/a/14501021/1728531'>best solution I found</a> is surprisingly simple, as with most of these things in Ember. Credit goes to lesyk on StackOverflow.</p>
+
+<p>This binds the <code>a</code> tag&#8217;s <code>href</code> attribute to the <code>href</code> of the <code>li</code> tag above which results in a clickable link that sets the <code>active</code> class on the <code>li</code> instead of on the <code>a</code> tag.</p>
+
+<p>The only thing you will have to make sure to do is to give your <code>a</code> tags an explicit <code>pointer</code> cursor in CSS for the <code>:hover</code> state:</p>
+<div class='highlight'><pre><code class='sass'><span class='nt'>a</span>
+  <span class='na'>cursor</span><span class='o'>:</span> <span class='no'>pointer</span>
+</code></pre></div>
+<p>And that&#8217;s it!</p>
+    </div>
+  </body>
+</html>

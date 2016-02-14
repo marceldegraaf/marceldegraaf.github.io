@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+    <title>CoreOS follow-up: Sinatra, Logstash, Elasticsearch, and Kibana</title>
+    <meta name="viewport" content="width=device-width">
+    <link rel="stylesheet" href="/assets/css/main.css">
+
+    <script type="text/javascript">
+      var _gaq = _gaq || [];
+      _gaq.push(['_setAccount', 'UA-116239-4']);
+      _gaq.push(['_trackPageview']);
+
+      (function() {
+        var ga = document.createElement('script'); ga.type = 'text/javascript'; ga.async = true;
+        ga.src = ('https:' == document.location.protocol ? 'https://ssl' : 'http://www') + '.google-analytics.com/ga.js';
+        var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(ga, s);
+      })();
+    </script>
+  </head>
+
+  <body id="single-post">
+    <div id="sidebar">
+  <div id="photo" class="circular">
+    <img src="/assets/img/me.jpg" alt="Marcel de Graaf" />
+  </div>
+
+  <h1>Marcel de Graaf</h1>
+  <p>Ops Engineer at <a href="https://yourkarma.com">Karma</a>. Drummer. Music enthusiast.</p>
+
+</div>
+
+
+    <div id="content-area">
+      <h2>CoreOS follow-up: Sinatra, Logstash, Elasticsearch, and Kibana</h2>
+
+      <p>In my <a href='http://marceldegraaf.net/2014/04/24/experimenting-with-coreos-confd-etcd-fleet-and-cloudformation.html'>previous article</a> I started to explore CoreOS on CloudFormation. I was extremely impressed by the power of the tools in the CoreOS ecosystem, so I decided to take the experiment one step further. By adding Logstash, Elasticsearch, and Kibana to the mix, we&#8217;re moving towards a more production ready setup.</p>
+
+<p>The complete source code for this article is <a href='https://github.com/marceldegraaf/blog-coreos-2'>here</a>.</p>
+
+<h3 id='introduction'>Introduction</h3>
+
+<p>So, what are Logstash, Elasticsearch, and Kibana? Just like last time, let me give you a quick introduction:</p>
+
+<ul>
+<li>
+<p><a href='http://logstash.net/'><strong>Logstash</strong></a> is a tool for managing events and logs. Logstash acts as a central place to send all logging and events, and comes with a wide range of so-called &#8220;outputs&#8221; to store or process these events.</p>
+</li>
+
+<li>
+<p><a href='http://www.elasticsearch.org/'><strong>Elasticsearch</strong></a> is a highly-available, scalable, data storage and search platform. It&#8217;s a document store with powerful search functions built in. We use it at Wakoopa to store, process, and analyze the logging events of all our applications. We currently store about 10GB of log data per day in Elasticsearch.</p>
+</li>
+
+<li>
+<p><a href='http://www.elasticsearch.org/overview/kibana'><strong>Kibana</strong></a> is a visualization tool built for Logstash data stored in Elasticsearch. It allows you to easily analyze, compare, and filter your log data and is an invaluable tool when troubleshooting issues in large-scale applications.</p>
+</li>
+</ul>
+
+<p>The goal for this article is to hook up these three technologies to the Nginx/Sinatra stack we built in the previous article. The idea is to let each Sinatra container ship off its log files to the central Logstash agent with logstash-forwarder. The Logstash agent will store the events in Elasticsearch and the Kibana plugin (on the Elasticsearch server) will allow us to analyze the data.</p>
+
+<p>I chose to run logstash-forwarder on the Sinatra container over the standard Java-based Logstash agent, because I want the log collection to have a minimal impact on the resource utilization of the container. Logstash-forwarder is written in Go and as such has a very low memory/CPU profile. It also starts almost instantaneously, which means the Sinatra container boot time isn&#8217;t impacted by the log collector.</p>
+
+<p>Before going with logstash-forwarder I briefly looked at <a href='http://heka-docs.readthedocs.org/en/latest/'>Heka</a> and <a href='http://hekad.readthedocs.org/en/latest/'>hekad</a> but I didn&#8217;t manage to get that running properly. If you are using Heka in a Ruby/Rails environment I&#8217;m extremely interested to hear your experiences. Please get in touch!</p>
+
+<h3 id='following_along'>Following along</h3>
+
+<p>For the rest of this article I assume you&#8217;ve got access to the <code>docker</code> and <code>fleetctl</code> commands, either on a (Vagrant) virtual machine or on your workstation. Follow the respective guides with installation instructions for your platform. Also make sure to clone the <a href='https://github.com/marceldegraaf/blog-coreos-2'>Github repo</a> that contains all the source code belonging to this article. Then return here to follow along with me :-).</p>
+
+<h3 id='setting_up_elasticsearch'>Setting up Elasticsearch</h3>
+
+<p>This is the easiest part. The Elasticsearch service has a pretty simple <a href='https://github.com/marceldegraaf/blog-coreos-2/blob/master/elasticsearch/Dockerfile'>Dockerfile</a> and a systemd unit that looks like this:</p>
+<div class='highlight'><pre><code class='ini'><span class='lineno'> 1</span> <span class='k'>[Unit]</span>
+<span class='lineno'> 2</span> <span class='na'>Description</span><span class='o'>=</span><span class='s'>elasticsearch</span>
+<span class='lineno'> 3</span> 
+<span class='lineno'> 4</span> <span class='k'>[Service]</span>
+<span class='lineno'> 5</span> <span class='na'>EnvironmentFile</span><span class='o'>=</span><span class='s'>/etc/environment</span>
+<span class='lineno'> 6</span> <span class='na'>ExecStartPre</span><span class='o'>=</span><span class='s'>/usr/bin/docker pull marceldegraaf/elasticsearch</span>
+<span class='lineno'> 7</span> <span class='na'>ExecStart</span><span class='o'>=</span><span class='s'>/usr/bin/docker run --rm --name elasticsearch -p 9200:9200 -e HOST_IP=${COREOS_PUBLIC_IPV4} marceldegraaf/elasticsearch</span>
+<span class='lineno'> 8</span> <span class='na'>ExecStartPost</span><span class='o'>=</span><span class='s'>/usr/bin/etcdctl set /elasticsearch/host ${COREOS_PUBLIC_IPV4}</span>
+<span class='lineno'> 9</span> <span class='na'>ExecStop</span><span class='o'>=</span><span class='s'>/usr/bin/docker kill elasticsearch</span>
+<span class='lineno'>10</span> <span class='na'>ExecStopPost</span><span class='o'>=</span><span class='s'>/usr/bin/etcdctl rm /elasticsearch/host</span>
+<span class='lineno'>11</span> 
+<span class='lineno'>12</span> <span class='k'>[X-Fleet]</span>
+<span class='lineno'>13</span> <span class='na'>X-Conflicts</span><span class='o'>=</span><span class='s'>elasticsearch.service</span>
+</code></pre></div>
+<p>As you can see we publish the IP address of the host that runs the Elasticsearch container to etcd, in the <code>/elasticsearch/host</code> key. This key will be picked up by the Logstash agent later on.</p>
+
+<p>Submit and start the unit with fleetctl:</p>
+<div class='highlight'><pre><code class='bash'>fleetctl submit elasticsearch.service
+fleetctl start elasticsearch.service
+</code></pre></div>
+<p>Once the unit has started, you should be able to open the Kopf plugin in your browser, to inspect the current state of the Elasticsearch cluster. You can reach Kopf with <code>http://&lt;elasticsearch-ip&gt;:9200/_plugin/kopf/</code>. It looks like this:</p>
+
+<p><img alt='Kopf' src='http://i.marceldegraaf.net/kopf_20140502_161309.png' /></p>
+
+<h3 id='setting_up_logstash'>Setting up Logstash</h3>
+
+<p>The next step is to set up a central Logstash agent that will receive log events from the logstash-forwarder process(es) in the Sinatra container(s). This is a bit more complicated, as the Lumberjack protocol (used by logstash-forwarder) requires you to use SSL. This means you need to create your own SSL certificates and configure them properly in Logstash (and later in logstash-forwarder).</p>
+
+<p>To solve this, the Logstash container creates a new SSL key pair every time it boots, and stores the new certificate and private key in etcd. Each Sinatra container can then create a local copy of the certificate and the private key, and configure logstash-forwarder with it. This is probably not the most elegant solution, but it serves its purpose for now. Feel free to spam me on <a href='https://twitter.com/marceldegraaf'>Twitter</a> or <a href='mailto:mail@marceldegraaf.net'>email</a> with better solutions for this ;-).</p>
+
+<p>The systemd unit for Logstash looks like this:</p>
+<div class='highlight'><pre><code class='ini'><span class='lineno'> 1</span> <span class='k'>[Unit]</span>
+<span class='lineno'> 2</span> <span class='na'>Description</span><span class='o'>=</span><span class='s'>logstash</span>
+<span class='lineno'> 3</span> 
+<span class='lineno'> 4</span> <span class='k'>[Service]</span>
+<span class='lineno'> 5</span> <span class='na'>EnvironmentFile</span><span class='o'>=</span><span class='s'>/etc/environment</span>
+<span class='lineno'> 6</span> <span class='na'>ExecStartPre</span><span class='o'>=</span><span class='s'>/usr/bin/docker pull marceldegraaf/logstash</span>
+<span class='lineno'> 7</span> <span class='na'>ExecStart</span><span class='o'>=</span><span class='s'>/usr/bin/docker run --rm --name logstash -e HOST_IP=${COREOS_PUBLIC_IPV4} -p 10101:10101 marceldegraaf/logstash</span>
+<span class='lineno'> 8</span> <span class='na'>ExecStartPost</span><span class='o'>=</span><span class='s'>/usr/bin/etcdctl set /logstash/host ${COREOS_PUBLIC_IPV4}</span>
+<span class='lineno'> 9</span> <span class='na'>ExecStop</span><span class='o'>=</span><span class='s'>/usr/bin/docker kill logstash</span>
+<span class='lineno'>10</span> <span class='na'>ExecStopPost</span><span class='o'>=</span><span class='s'>/usr/bin/etcdctl rm --dir --recursive /logstash</span>
+<span class='lineno'>11</span> 
+<span class='lineno'>12</span> <span class='k'>[X-Fleet]</span>
+<span class='lineno'>13</span> <span class='na'>X-Conflicts</span><span class='o'>=</span><span class='s'>logstash.service</span>
+</code></pre></div>
+<p>This is nothing really special. Just as with Elasticsearch, we register the IP address of Logstash in etcd, in the <code>/logstash/host</code> key. This is to make sure logstash-forwarder in the Sinatra containers can find the running Logstash agent in the network.</p>
+
+<p>More notable is the <code>boot.sh</code> script (full code <a href='https://github.com/marceldegraaf/blog-coreos-2/blob/master/logstash/bin/boot.sh'>here</a>) that gets run when the Docker container starts. These are the most interesting parts:</p>
+<div class='highlight'><pre><code class='bash'><span class='lineno'> 1</span> <span class='c'># Loop until confd has updated the logstash config</span>
+<span class='lineno'> 2</span> <span class='k'>until </span>confd -onetime -node <span class='nv'>$ETCD</span> -config-file /etc/confd/conf.d/logstash.toml; <span class='k'>do</span>
+<span class='lineno'> 3</span> <span class='k'>  </span><span class='nb'>echo</span> <span class='s2'>&quot;[logstash] waiting for confd to refresh logstash.conf (waiting for ElasticSearch to be available)&quot;</span>
+<span class='lineno'> 4</span>   sleep 5
+<span class='lineno'> 5</span> <span class='k'>done</span>
+<span class='lineno'> 6</span> 
+<span class='lineno'> 7</span> <span class='c'># Create a new SSL certificate</span>
+<span class='lineno'> 8</span> openssl req -x509 -batch -nodes -newkey rsa:2048 -keyout /opt/logstash/ssl/logstash-forwarder.key -out /opt/logstash/ssl/logstash-forwarder.crt
+<span class='lineno'> 9</span> 
+<span class='lineno'>10</span> <span class='c'># Publish SSL cert/key to etcd</span>
+<span class='lineno'>11</span> curl -L <span class='nv'>$ETCD</span>/v2/keys/logstash/ssl_certificate -XPUT --data-urlencode value@/opt/logstash/ssl/logstash-forwarder.crt
+<span class='lineno'>12</span> curl -L <span class='nv'>$ETCD</span>/v2/keys/logstash/ssl_private_key -XPUT --data-urlencode value@/opt/logstash/ssl/logstash-forwarder.key
+</code></pre></div>
+<p>As you can see we first enter an endless <code>until</code> loop that waits for the <code>/elasticsearch/host</code> etcd key to be available. Once this key is available, confd updates the <code>logstash.conf</code> file, setting the hostname of Elasticsearch. Effectively, this also means the Logstash agent will not start before Elasticsearch is running and <code>logstash.conf</code> has been updated. In a production environment you would probably not do this, but rather add a buffer between Logstash and Elasticsearch. At Wakoopa we currently solve this with a Redis buffer (Logstash has built-in Redis inputs and outputs). This is to make sure that log events will still be stored somewhere, even if Elasticsearch is down for a bit. However, in this article I assume Logstash will only run once Elasticsearch is up.</p>
+
+<p>Next we create a new SSL certificate with a private key, using <code>openssl</code>, and store the two resulting files in etcd with <code>curl</code>. As you will see further on, these keys will be downloaded from etcd in the <code>boot.sh</code> script of the Sinatra container, to configure logstash-forwarder with.</p>
+
+<p>As usual, start the Logstash agent with fleetctl:</p>
+<div class='highlight'><pre><code class='bash'>fleetctl submit logstash.service
+fleetctl start logstash.service
+</code></pre></div>
+<p>Once Logstash is running we can move on to the Sinatra containers, where the actual log collection will happen.</p>
+
+<h3 id='preparing_sinatra'>Preparing Sinatra</h3>
+
+<p>To make sure Sinatra writes its logs in a format that Logstash can understand, we use a custom <code>LogstashLogger</code> class:</p>
+<div class='highlight'><pre><code class='ruby'><span class='lineno'> 1</span> <span class='k'>class</span> <span class='nc'>LogstashLogger</span> <span class='o'>&lt;</span> <span class='ss'>Rack</span><span class='p'>:</span><span class='ss'>:CommonLogger</span>
+<span class='lineno'> 2</span>   <span class='kp'>private</span>
+<span class='lineno'> 3</span> 
+<span class='lineno'> 4</span>   <span class='k'>def</span> <span class='nf'>log</span><span class='p'>(</span><span class='n'>env</span><span class='p'>,</span> <span class='n'>status</span><span class='p'>,</span> <span class='n'>header</span><span class='p'>,</span> <span class='n'>began_at</span><span class='p'>)</span>
+<span class='lineno'> 5</span>     <span class='n'>now</span>    <span class='o'>=</span> <span class='no'>Time</span><span class='o'>.</span><span class='n'>now</span>
+<span class='lineno'> 6</span>     <span class='n'>length</span> <span class='o'>=</span> <span class='n'>extract_content_length</span><span class='p'>(</span><span class='n'>header</span><span class='p'>)</span>
+<span class='lineno'> 7</span>     <span class='n'>logger</span> <span class='o'>=</span> <span class='vi'>@logger</span> <span class='o'>||</span> <span class='n'>env</span><span class='o'>[</span><span class='s1'>&#39;rack.errors&#39;</span><span class='o'>]</span>
+<span class='lineno'> 8</span> 
+<span class='lineno'> 9</span>     <span class='n'>json</span> <span class='o'>=</span> <span class='p'>{</span>
+<span class='lineno'>10</span>       <span class='s1'>&#39;@timestamp&#39;</span> <span class='o'>=&gt;</span> <span class='n'>now</span><span class='o'>.</span><span class='n'>utc</span><span class='o'>.</span><span class='n'>iso8601</span><span class='p'>,</span>
+<span class='lineno'>11</span>       <span class='s1'>&#39;@fields&#39;</span>    <span class='o'>=&gt;</span> <span class='p'>{</span>
+<span class='lineno'>12</span>         <span class='s1'>&#39;method&#39;</span>   <span class='o'>=&gt;</span> <span class='n'>env</span><span class='o'>[</span><span class='s1'>&#39;REQUEST_METHOD&#39;</span><span class='o'>]</span><span class='p'>,</span>
+<span class='lineno'>13</span>         <span class='s1'>&#39;path&#39;</span>     <span class='o'>=&gt;</span> <span class='n'>env</span><span class='o'>[</span><span class='s1'>&#39;PATH_INFO&#39;</span><span class='o'>]</span><span class='p'>,</span>
+<span class='lineno'>14</span>         <span class='s1'>&#39;status&#39;</span>   <span class='o'>=&gt;</span> <span class='n'>status</span><span class='o'>.</span><span class='n'>to_s</span><span class='o'>[</span><span class='mi'>0</span><span class='o'>.</span><span class='n'>.</span><span class='mi'>3</span><span class='o'>]</span><span class='p'>,</span>
+<span class='lineno'>15</span>         <span class='s1'>&#39;size&#39;</span>     <span class='o'>=&gt;</span> <span class='n'>length</span><span class='p'>,</span>
+<span class='lineno'>16</span>         <span class='s1'>&#39;duration&#39;</span> <span class='o'>=&gt;</span> <span class='n'>now</span> <span class='o'>-</span> <span class='n'>began_at</span><span class='p'>,</span>
+<span class='lineno'>17</span>       <span class='p'>}</span>
+<span class='lineno'>18</span>     <span class='p'>}</span>
+<span class='lineno'>19</span> 
+<span class='lineno'>20</span>     <span class='n'>logger</span><span class='o'>.</span><span class='n'>puts</span><span class='p'>(</span><span class='n'>json</span><span class='o'>.</span><span class='n'>to_json</span><span class='p'>)</span>
+<span class='lineno'>21</span>   <span class='k'>end</span>
+<span class='lineno'>22</span> <span class='k'>end</span>
+</code></pre></div>
+<p>The fields in the <code>json</code> hash correspond to Logstash&#8217;s format, so we dont need to do any grokking to store the events in Logstash. We include the logger in <code>app.rb</code> like this:</p>
+<div class='highlight'><pre><code class='ruby'><span class='lineno'> 1</span> <span class='n'>require_relative</span> <span class='s1'>&#39;lib/logstash_logger&#39;</span>
+<span class='lineno'> 2</span> 
+<span class='lineno'> 3</span> <span class='n'>configure</span> <span class='k'>do</span>
+<span class='lineno'> 4</span>   <span class='n'>enable</span> <span class='ss'>:logging</span>
+<span class='lineno'> 5</span> 
+<span class='lineno'> 6</span>   <span class='n'>file</span> <span class='o'>=</span> <span class='no'>File</span><span class='o'>.</span><span class='n'>new</span><span class='p'>(</span><span class='no'>File</span><span class='o'>.</span><span class='n'>join</span><span class='p'>(</span><span class='vg'>$ROOT</span><span class='p'>,</span> <span class='s2'>&quot;sinatra.log&quot;</span><span class='p'>),</span> <span class='s1'>&#39;a+&#39;</span><span class='p'>)</span>
+<span class='lineno'> 7</span>   <span class='n'>file</span><span class='o'>.</span><span class='n'>sync</span> <span class='o'>=</span> <span class='kp'>true</span>
+<span class='lineno'> 8</span> 
+<span class='lineno'> 9</span>   <span class='n'>use</span> <span class='no'>LogstashLogger</span><span class='p'>,</span> <span class='n'>file</span>
+<span class='lineno'>10</span> <span class='k'>end</span>
+</code></pre></div>
+<p>As you can see we write a <code>sinatra.log</code> file to the root of the Sinatra application, which is <code>/opt/app</code> (see the relevant <code>ADD</code> line in the <a href='https://github.com/marceldegraaf/blog-coreos-2/blob/master/sinatra/Dockerfile'>Dockerfile</a>). This is the file that logstash-forwarder will have to watch.</p>
+
+<h3 id='adding_logstashforwarder'>Adding logstash-forwarder</h3>
+
+<p>To collect log events with logstash-forwarder we must add it to the Sinatra container, and make sure it runs in the background before Sinatra starts. It must also be properly configured, which will be done by confd. These are the interesting parts of <code>boot.sh</code> (full codre <a href='https://github.com/marceldegraaf/blog-coreos-2/blob/master/sinatra/bin/boot.sh'>here</a>):</p>
+<div class='highlight'><pre><code class='bash'><span class='lineno'>1</span> <span class='c'># Update all logstash-forwarder templates</span>
+<span class='lineno'>2</span> <span class='nb'>echo</span> <span class='s2'>&quot;[app] updating logstash-forwarder config files&quot;</span>
+<span class='lineno'>3</span> confd -onetime -node <span class='nv'>$ETCD</span>
+<span class='lineno'>4</span> 
+<span class='lineno'>5</span> <span class='c'># Start logstash-forwarder and background it</span>
+<span class='lineno'>6</span> logstash-forwarder -config /etc/logstash-forwarder.json &amp;
+</code></pre></div>
+<p>We let confd run once (with the <code>-onetime</code> flag) to update the logstash-forwarder configuration files. As you can see we assume Logstash is already running and has already pushed it&#8217;s hostname and the SSL keys to etcd. This is a bit naive: normally one would create an init script for logstash-forwarder and let confd run in the background to keep an eye on the <code>/logstash/*</code> key in etcd, and restart logstash-forwarder once those keys change. In this article I assume Logstash will stay up, and the contents of the <code>/logstash/*</code> keys will not change.</p>
+
+<p>The config file for logstash-forwarder is in JSON format, and (after confd has processed it) looks like this:</p>
+<div class='highlight'><pre><code class='json'><span class='lineno'> 1</span> <span class='p'>{</span>
+<span class='lineno'> 2</span>   <span class='nt'>&quot;network&quot;</span><span class='p'>:</span> <span class='p'>{</span>
+<span class='lineno'> 3</span>     <span class='nt'>&quot;servers&quot;</span><span class='p'>:</span> <span class='p'>[</span> <span class='s2'>&quot;&lt;logstash-host&gt;:10101&quot;</span> <span class='p'>],</span>
+<span class='lineno'> 4</span>     <span class='nt'>&quot;ssl certificate&quot;</span><span class='p'>:</span> <span class='s2'>&quot;/opt/logstash/ssl/logstash-forwarder.crt&quot;</span><span class='p'>,</span>
+<span class='lineno'> 5</span>     <span class='nt'>&quot;ssl key&quot;</span><span class='p'>:</span> <span class='s2'>&quot;/opt/logstash/ssl/logstash-forwarder.key&quot;</span><span class='p'>,</span>
+<span class='lineno'> 6</span>     <span class='nt'>&quot;ssl ca&quot;</span><span class='p'>:</span> <span class='s2'>&quot;/opt/logstash/ssl/logstash-forwarder.crt&quot;</span><span class='p'>,</span>
+<span class='lineno'> 7</span>     <span class='nt'>&quot;timeout&quot;</span><span class='p'>:</span> <span class='mi'>15</span>
+<span class='lineno'> 8</span>   <span class='p'>},</span>
+<span class='lineno'> 9</span> 
+<span class='lineno'>10</span>   <span class='nt'>&quot;files&quot;</span><span class='p'>:</span> <span class='p'>[</span>
+<span class='lineno'>11</span>     <span class='p'>{</span>
+<span class='lineno'>12</span>       <span class='nt'>&quot;paths&quot;</span><span class='p'>:</span> <span class='p'>[</span>
+<span class='lineno'>13</span>         <span class='s2'>&quot;/opt/app/sinatra.log&quot;</span>
+<span class='lineno'>14</span>       <span class='p'>],</span>
+<span class='lineno'>15</span>       <span class='nt'>&quot;fields&quot;</span><span class='p'>:</span> <span class='p'>{</span> <span class='nt'>&quot;type&quot;</span><span class='p'>:</span> <span class='s2'>&quot;syslog&quot;</span> <span class='p'>}</span>
+<span class='lineno'>16</span>     <span class='p'>}</span>
+<span class='lineno'>17</span>   <span class='p'>]</span>
+<span class='lineno'>18</span> <span class='p'>}</span>
+</code></pre></div>
+<p>The SSL certificate and private key are created by confd with their respective values from etcd. Logstash-forwarder just assumes the files are there, and contain the correct content.</p>
+
+<p>Installing logstash-forwarder on the Docker container was a bit painful. I&#8217;m working on a Mac, so building the logstash-forwarder binary on my local system means it cannot be run on a Linux machine (or container). On the other hand I also don&#8217;t want to install Go on the Docker container, just to build the logstash-forwarder binary. So, in the end I just spun up a Digital Ocean droplet, installed Go, built logstash-forwarder there, and uploaded the built binary to S3. You can find it <a href='http://files.marceldegraaf.net/logstash-forwarder'>here</a>. It&#8217;s also added to the Docker container in the <a href='https://github.com/marceldegraaf/blog-coreos-2/blob/master/sinatra/Dockerfile#L20'>Dockerfile</a>.</p>
+
+<p>When you run <code>file logstash-forwarder</code> it should show: <code>logstash-forwarder: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), dynamically linked (uses shared libs), not stripped</code>. If you build the binary for the wrong architecture, Docker will throw an error when you start the binary, saying: <code>cannot execute binary file</code>.</p>
+
+<p>Now that logstash-forwarder is ready, it&#8217;s time to launch the Sinatra container to see what it does.</p>
+
+<h3 id='all_together_now'>All together now!</h3>
+
+<p>As usual, fire up the Sinatra container with fleetctl, using one of the symlinked unit files from the previous article:</p>
+<div class='highlight'><pre><code class='bash'>fleetctl submit sinatra@5000.service
+fleetctl start sinatra@5000.service
+</code></pre></div>
+<p>If you call <code>fleetctl journal -f sinatra@5000.service</code> immediately after starting the unit, you can follow the process of booting the container. To confirm logstash-forwarder is running properly, you should see something like this:</p>
+<div class='highlight'><pre><code class='bash'>Launching harvester on new file: /opt/app/sinatra.log
+Loading client ssl certificate: /opt/logstash/ssl/logstash-forwarder.crt and /opt/logstash/ssl/logstash-forwarder.key
+Starting harvester: /opt/app/sinatra.log
+...
+Setting trusted CA from file: /opt/logstash/ssl/logstash-forwarder.crt
+Connecting to 172.17.8.101:10101 <span class='o'>(</span>172.17.8.101<span class='o'>)</span>
+Connected to 172.17.8.101
+</code></pre></div>
+<p>To be able to actually open the &#8220;Hello World!&#8221; page of the Sinatra app, also start the nginx proxy container:</p>
+<div class='highlight'><pre><code class='bash'>fleetctl submit nginx.service
+fleetctl start nginx.service
+</code></pre></div>
+<p>Your <code>fleetctl list-units</code> should look like this:</p>
+<div class='highlight'><pre><code class='bash'>UNIT                  LOAD    ACTIVE  SUB     DESC          MACHINE
+elasticsearch.service loaded  active  running elasticsearch 98bb2d97.../172.17.8.102
+logstash.service      loaded  active  running logstash      fed8c3f4.../172.17.8.101
+nginx.service         loaded  active  running nginx         98bb2d97.../172.17.8.102
+sinatra@5000.service  loaded  active  running sinatra       fed8c3f4.../172.17.8.101
+</code></pre></div>
+<p>If you open your browser and enter the IP address of the nginx service (in my case <code>172.17.8.102</code>) you should see &#8220;Hello World!&#8221;. But, more interestingly, you should also see a line like this in <code>fleetctl journal elasticsearch.service</code>:</p>
+<div class='highlight'><pre><code class='bash'><span class='o'>[</span>INFO <span class='o'>][</span>cluster.metadata<span class='o'>]</span> <span class='o'>[</span>Madelyne Pryor<span class='o'>]</span> <span class='o'>[</span>logstash-2014.05.03<span class='o'>]</span> creating index, cause <span class='o'>[</span>auto<span class='o'>(</span>bulk api<span class='o'>)]</span>, shards <span class='o'>[</span>5<span class='o'>]</span>/<span class='o'>[</span>1<span class='o'>]</span>, mappings <span class='o'>[</span>_default_<span class='o'>]</span>
+<span class='o'>[</span>INFO <span class='o'>][</span>cluster.metadata<span class='o'>]</span> <span class='o'>[</span>Madelyne Pryor<span class='o'>]</span> <span class='o'>[</span>logstash-2014.05.03<span class='o'>]</span> update_mapping <span class='o'>[</span>syslog<span class='o'>]</span> <span class='o'>(</span>dynamic<span class='o'>)</span>
+</code></pre></div>
+<p>This means the first Logstash event was processed, and a new index was created for it in Elasticsearch. You should see this index being listed in the Kopf interface of your Elasticsearch cluster as well.</p>
+
+<p>If you now point your browser to <code>&lt;elasticsearch-ip&gt;:9200/_plugin/kibana3/index.html#/dashboard/file/logstash.json</code> you see the Kibana Logstash page, which should look like this:</p>
+
+<p><img alt='Kibana' src='http://i.marceldegraaf.net/Kibana_3__Logstash_Search_20140503_121019.png' /></p>
+
+<p>The vertical green bar represents requests to your Sinatra application, and the table underneath the graph contains a detailed overview of each request. To make this a bit more interesting, let&#8217;s start up three more Sinatra containers (on ports 5001, 5002, and 5003) and use the Ruby script below to generate some load on the containers:</p>
+<div class='highlight'><pre><code class='bash'>fleetctl submit sinatra@5001.service
+fleetctl submit sinatra@5002.service
+fleetctl submit sinatra@5003.service
+fleetctl start sinatra@5001.service
+fleetctl start sinatra@5002.service
+fleetctl start sinatra@5003.service
+</code></pre></div>
+<p>The benchmark script looks like this:</p>
+<div class='highlight'><pre><code class='ruby'><span class='lineno'> 1</span> <span class='nb'>require</span> <span class='s2'>&quot;net/http&quot;</span>
+<span class='lineno'> 2</span> <span class='nb'>require</span> <span class='s2'>&quot;uri&quot;</span>
+<span class='lineno'> 3</span> 
+<span class='lineno'> 4</span> <span class='k'>while</span> <span class='kp'>true</span> <span class='k'>do</span>
+<span class='lineno'> 5</span>   <span class='n'>threads</span> <span class='o'>=</span> <span class='o'>[]</span>
+<span class='lineno'> 6</span> 
+<span class='lineno'> 7</span>   <span class='mi'>5</span><span class='o'>.</span><span class='n'>times</span> <span class='k'>do</span>
+<span class='lineno'> 8</span>     <span class='n'>threads</span> <span class='o'>&lt;&lt;</span> <span class='no'>Thread</span><span class='o'>.</span><span class='n'>new</span> <span class='k'>do</span>
+<span class='lineno'> 9</span>       <span class='ss'>Net</span><span class='p'>:</span><span class='ss'>:HTTP</span><span class='o'>.</span><span class='n'>get_response</span><span class='p'>(</span><span class='no'>URI</span><span class='o'>.</span><span class='n'>parse</span><span class='p'>(</span><span class='s2'>&quot;http://172.17.8.102&quot;</span><span class='p'>))</span>
+<span class='lineno'>10</span>     <span class='k'>end</span>
+<span class='lineno'>11</span>   <span class='k'>end</span>
+<span class='lineno'>12</span> 
+<span class='lineno'>13</span>   <span class='n'>threads</span><span class='o'>.</span><span class='n'>join</span>
+<span class='lineno'>14</span> 
+<span class='lineno'>15</span>   <span class='nb'>sleep</span> <span class='nb'>rand</span><span class='p'>(</span><span class='mi'>2</span><span class='p'>)</span>
+<span class='lineno'>16</span> <span class='k'>end</span>
+</code></pre></div>
+<p>Make sure to replace the IP address with the IP of your nginx service. If you start this script with <code>ruby ./benchmark.rb</code> and open Kibana in your browser, you should see some more interesting data:</p>
+
+<p><img alt='Kibana' src='http://i.marceldegraaf.net/Kibana_3__Logstash_Search_20140502_161251.png' /></p>
+
+<h3 id='conclusion'>Conclusion</h3>
+
+<p>Using logstash-forwarder together with Logstash and Elasticsearch is a powerful way to aggregate all your application&#8217;s log events with a minimal impact on the application container itself. Logstash provides a very flexible input/output system, and we haven&#8217;t even touched on the various filters that Logstash offers. In a production environment you would also make more use of tags to distinguish between log events of your different applications. These tags can be used in Kibana to easily filter the events of a single application, or even of a single container.</p>
+
+<p>I&#8217;m not sure where to go from here. I have a few ideas for things I&#8217;d like to test, but if you have requests: please let me know via <a href='https://twitter.com/marceldegraaf'>Twitter</a>. Thanks for reading!</p>
+    </div>
+  </body>
+</html>

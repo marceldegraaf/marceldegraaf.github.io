@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+    <title>Elasticsearch on EC2 with node auto-discovery</title>
+    <meta name="viewport" content="width=device-width">
+    <link rel="stylesheet" href="/assets/css/main.css">
+
+    <script type="text/javascript">
+      var _gaq = _gaq || [];
+      _gaq.push(['_setAccount', 'UA-116239-4']);
+      _gaq.push(['_trackPageview']);
+
+      (function() {
+        var ga = document.createElement('script'); ga.type = 'text/javascript'; ga.async = true;
+        ga.src = ('https:' == document.location.protocol ? 'https://ssl' : 'http://www') + '.google-analytics.com/ga.js';
+        var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(ga, s);
+      })();
+    </script>
+  </head>
+
+  <body id="single-post">
+    <div id="sidebar">
+  <div id="photo" class="circular">
+    <img src="/assets/img/me.jpg" alt="Marcel de Graaf" />
+  </div>
+
+  <h1>Marcel de Graaf</h1>
+  <p>Ops Engineer at <a href="https://yourkarma.com">Karma</a>. Drummer. Music enthusiast.</p>
+
+</div>
+
+
+    <div id="content-area">
+      <h2>Elasticsearch on EC2 with node auto-discovery</h2>
+
+      <p>At Wakoopa we use Elasticsearch for a few of our applications, so we&#8217;ve set up a centralized Elasticsearch cluster that is managed with Amazon CloudFormation and Chef.</p>
+
+<p>For the uninitiated: Elasticsearch is a search engine that is built with high availability and horizontal scaling in mind. Node auto-discovery is the process in which an Elasticsearch node (typically a single server) is added to a cluster automatically.</p>
+
+<p>To set up Elasticsearch on EC2, I followed <a href='http://www.elasticsearch.org/tutorials/elasticsearch-on-ec2/'>this excellent tutorial</a>. Most of the heavy lifting regarding EC2 (and auto-discovery through the AWS API) is done by the <a href='https://github.com/elasticsearch/elasticsearch-cloud-aws'>elasticsearch-cloud-aws plugin</a>. However, I had some difficulty getting node auto-discovery to work. At one point I had 3 EC2 instances running Elasticsearch, but each of these nodes promoted itself to master because the other nodes could not be found.</p>
+
+<p>After some googling it appeared that the <code>discovery.type</code>, <code>discovery.ec2.groups</code>, and <code>cloud.aws.region</code> configuration options are the key to get this to work.</p>
+
+<p>The <code>discovery.type</code> setting must be set to <code>ec2</code> to tell Elasticsearch to use the AWS API to find suitable EC2 instances that are Elasticsearch nodes. Suitable nodes then get added to the cluster automatically.</p>
+
+<p>The <code>discovery.ec2.groups</code> setting tells Elasticsearch to limit the search for EC2 instances to a certain EC2 Security Group. Without this setting, <strong>all</strong> running instances in your AWS account will be pinged to see if the instance is an Elasticsearch node. For me this failed. To solve this, add all Elasticsearch nodes to a Security Group and specify the name of the Security Group in this configuration setting. In our case this is <code>elasticsearch</code>.</p>
+
+<p>The <code>cloud.aws.region</code> further limits the search for instances, this time to a specific AWS region.</p>
+
+<p>So, putting it all together, this is how our configuration looks:</p>
+<div class='highlight'><pre><code class='yaml'><span class='l-Scalar-Plain'>cluster</span><span class='p-Indicator'>:</span>
+  <span class='l-Scalar-Plain'>name</span><span class='p-Indicator'>:</span> <span class='l-Scalar-Plain'>search.example.com</span>
+
+<span class='l-Scalar-Plain'>node</span><span class='p-Indicator'>:</span>
+  <span class='l-Scalar-Plain'>name</span><span class='p-Indicator'>:</span> <span class='l-Scalar-Plain'>your-node-name</span> <span class='c1'># in our case this is set to the host IP with Chef</span>
+
+<span class='l-Scalar-Plain'>path</span><span class='p-Indicator'>:</span>
+  <span class='l-Scalar-Plain'>data</span><span class='p-Indicator'>:</span> <span class='l-Scalar-Plain'>/mnt/elasticsearch/data</span>
+  <span class='l-Scalar-Plain'>logs</span><span class='p-Indicator'>:</span> <span class='l-Scalar-Plain'>/mnt/elasticsearch/logs</span>
+
+<span class='l-Scalar-Plain'>discovery</span><span class='p-Indicator'>:</span>
+  <span class='l-Scalar-Plain'>type</span><span class='p-Indicator'>:</span> <span class='l-Scalar-Plain'>ec2</span>
+
+  <span class='l-Scalar-Plain'>ec2</span><span class='p-Indicator'>:</span>
+    <span class='l-Scalar-Plain'>groups</span><span class='p-Indicator'>:</span> <span class='l-Scalar-Plain'>elasticsearch</span>
+
+<span class='l-Scalar-Plain'>gateway</span><span class='p-Indicator'>:</span>
+  <span class='l-Scalar-Plain'>type</span><span class='p-Indicator'>:</span> <span class='l-Scalar-Plain'>s3</span>
+  <span class='l-Scalar-Plain'>s3</span><span class='p-Indicator'>:</span>
+    <span class='l-Scalar-Plain'>bucket</span><span class='p-Indicator'>:</span> <span class='l-Scalar-Plain'>your-bucket</span>
+
+<span class='l-Scalar-Plain'>cloud</span><span class='p-Indicator'>:</span>
+  <span class='l-Scalar-Plain'>aws</span><span class='p-Indicator'>:</span>
+    <span class='l-Scalar-Plain'>region</span><span class='p-Indicator'>:</span> <span class='l-Scalar-Plain'>eu-west-1</span>
+
+<span class='l-Scalar-Plain'>index</span><span class='p-Indicator'>:</span>
+  <span class='l-Scalar-Plain'>number_of_shards</span><span class='p-Indicator'>:</span> <span class='l-Scalar-Plain'>6</span>
+</code></pre></div>
+<p><strong>Bonus</strong>: to view the status of all your nodes, install the amazing <a href='https://github.com/karmi/elasticsearch-paramedic/'>Paramedic</a> plugin. It&#8217;s an embedded Ember.js app that polls the status of your indeces and nodes, and visualizes their performance.</p>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+    <title>Ember.js and Highcharts</title>
+    <meta name="viewport" content="width=device-width">
+    <link rel="stylesheet" href="/assets/css/main.css">
+
+    <script type="text/javascript">
+      var _gaq = _gaq || [];
+      _gaq.push(['_setAccount', 'UA-116239-4']);
+      _gaq.push(['_trackPageview']);
+
+      (function() {
+        var ga = document.createElement('script'); ga.type = 'text/javascript'; ga.async = true;
+        ga.src = ('https:' == document.location.protocol ? 'https://ssl' : 'http://www') + '.google-analytics.com/ga.js';
+        var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(ga, s);
+      })();
+    </script>
+  </head>
+
+  <body id="single-post">
+    <div id="sidebar">
+  <div id="photo" class="circular">
+    <img src="/assets/img/me.jpg" alt="Marcel de Graaf" />
+  </div>
+
+  <h1>Marcel de Graaf</h1>
+  <p>Ops Engineer at <a href="https://yourkarma.com">Karma</a>. Drummer. Music enthusiast.</p>
+
+</div>
+
+
+    <div id="content-area">
+      <h2>Ember.js and Highcharts</h2>
+
+      <p>For <a href='http://wakoopa.com'>Wakoopa</a> we&#8217;re currently investigating the use of Ember.js for one of our products. This post demonstrates how to integrate <a href='http://www.highcharts.com/'>Highcharts</a> into an Ember application.</p>
+
+<p>The implementation consists of a few key parts:</p>
+
+<ul>
+<li>A graph config file that holds the Highcharts configuration</li>
+
+<li>A subclass of this graph config file for each type of graph (line, bar, &#8230;)</li>
+
+<li>A graph controller that does the actual rendering with Highcharts</li>
+
+<li>An Ember view that wraps around the graph controller</li>
+
+<li>A subclass of this Ember view for each type of graph, to be used in your templates</li>
+</ul>
+
+<p>The graph configuration:</p>
+<div class='highlight'><pre><code class='coffeescript'><span class='nv'>App.GraphConfig = </span><span class='nx'>Ember</span><span class='p'>.</span><span class='nb'>Object</span><span class='p'>.</span><span class='nx'>create</span>
+  <span class='nv'>chart: </span><span class='kc'>null</span>
+  <span class='nv'>renderToId: </span><span class='kc'>null</span>
+  <span class='nv'>chartType: </span><span class='kc'>null</span>
+  <span class='nv'>series: </span><span class='kc'>null</span>
+  <span class='nv'>categories: </span><span class='kc'>null</span>
+
+  <span class='nv'>initialize: </span><span class='nf'>-&gt;</span>
+    <span class='nv'>chart =</span>
+      <span class='nv'>renderTo: </span><span class='nx'>@get</span><span class='p'>(</span><span class='s'>&#39;renderToId&#39;</span><span class='p'>)</span>
+      <span class='nv'>type: </span>    <span class='nx'>@get</span><span class='p'>(</span><span class='s'>&#39;chartType&#39;</span><span class='p'>)</span>
+
+    <span class='nv'>xAxis =</span>
+      <span class='nv'>categories: </span><span class='nx'>@get</span><span class='p'>(</span><span class='s'>&#39;categories&#39;</span><span class='p'>)</span>
+
+    <span class='nv'>title =</span>
+      <span class='nv'>text: </span><span class='nx'>@get</span><span class='p'>(</span><span class='s'>&#39;title&#39;</span><span class='p'>)</span>
+
+    <span class='nx'>@set</span><span class='p'>(</span><span class='s'>&#39;chart&#39;</span><span class='p'>,</span> <span class='nx'>chart</span><span class='p'>)</span>
+    <span class='nx'>@set</span><span class='p'>(</span><span class='s'>&#39;xAxis&#39;</span><span class='p'>,</span> <span class='nx'>xAxis</span><span class='p'>)</span>
+    <span class='nx'>@set</span><span class='p'>(</span><span class='s'>&#39;title&#39;</span><span class='p'>,</span> <span class='nx'>title</span><span class='p'>)</span>
+
+  <span class='nv'>credits:</span>
+    <span class='nv'>enabled: </span><span class='kc'>false</span>
+
+  <span class='nv'>colors: </span><span class='p'>[</span> <span class='s'>&quot;</span><span class='err'>#</span><span class='s'>2f69bf&quot;</span><span class='p'>,</span> <span class='s'>&quot;</span><span class='err'>#</span><span class='s'>a2bf2f&quot;</span><span class='p'>,</span> <span class='s'>&quot;</span><span class='err'>#</span><span class='s'>bf5a2f&quot;</span><span class='p'>,</span> <span class='s'>&quot;</span><span class='err'>#</span><span class='s'>bfa22f&quot;</span><span class='p'>,</span> <span class='s'>&quot;</span><span class='err'>#</span><span class='s'>772fbf&quot;</span><span class='p'>,</span>
+            <span class='s'>&quot;</span><span class='err'>#</span><span class='s'>bf2f2f&quot;</span><span class='p'>,</span> <span class='s'>&quot;</span><span class='err'>#</span><span class='s'>00337f&quot;</span><span class='p'>,</span> <span class='s'>&quot;</span><span class='err'>#</span><span class='s'>657f00&quot;</span><span class='p'>,</span> <span class='s'>&quot;</span><span class='err'>#</span><span class='s'>7f2600&quot;</span><span class='p'>,</span> <span class='s'>&quot;</span><span class='err'>#</span><span class='s'>7f6500&quot;</span> <span class='p'>]</span>
+</code></pre></div>
+<p>As you can see we immediately <code>create</code> an Ember object here, that has a few properties and an <code>initialize</code> function. It is in this <code>initialize</code> function that various parts of the configuration get set when the graph controller is setting up the graph for rendering.</p>
+
+<p>A subclass of this graph config that defines a line graph:</p>
+<div class='highlight'><pre><code class='coffeescript'><span class='nv'>App.LineGraphConfig = </span><span class='nx'>Ember</span><span class='p'>.</span><span class='nb'>Object</span><span class='p'>.</span><span class='nx'>extend</span> <span class='nx'>App</span><span class='p'>.</span><span class='nx'>GraphConfig</span><span class='p'>,</span>
+  <span class='nv'>yAxis:</span>
+    <span class='nv'>title:</span>
+      <span class='nv'>text: </span><span class='kc'>null</span>
+
+  <span class='nv'>plotOptions:</span>
+    <span class='nv'>bar:</span>
+      <span class='nv'>animation: </span><span class='kc'>false</span>
+      <span class='nv'>borderWidth: </span><span class='mi'>0</span>
+      <span class='nv'>shadow: </span><span class='kc'>false</span>
+      <span class='nv'>dataLabels:</span>
+        <span class='nv'>enabled: </span><span class='kc'>true</span>
+</code></pre></div>
+<p>The graph controller:</p>
+<div class='highlight'><pre><code class='coffeescript'><span class='nv'>App.GraphController = </span><span class='nx'>Ember</span><span class='p'>.</span><span class='nx'>ObjectController</span><span class='p'>.</span><span class='nx'>extend</span>
+  <span class='nv'>graphConfig: </span><span class='nf'>(type) -&gt;</span>
+    <span class='k'>switch</span> <span class='nx'>type</span>
+      <span class='k'>when</span> <span class='s'>&#39;line&#39;</span> <span class='k'>then</span> <span class='nx'>App</span><span class='p'>.</span><span class='nx'>LineGraphConfig</span>
+
+  <span class='nv'>graphType: </span><span class='nf'>(type) -&gt;</span>
+    <span class='k'>switch</span> <span class='nx'>type</span>
+      <span class='k'>when</span> <span class='s'>&#39;line&#39;</span> <span class='k'>then</span> <span class='s'>&#39;line&#39;</span>
+
+  <span class='nv'>render: </span><span class='nf'>(render_to, type, data, categories, title) -&gt;</span>
+    <span class='nv'>graph     = </span><span class='nx'>@graphConfig</span><span class='p'>(</span><span class='nx'>type</span><span class='p'>).</span><span class='nx'>create</span><span class='p'>()</span>
+    <span class='nv'>graphType = </span><span class='nx'>@graphType</span><span class='p'>(</span><span class='nx'>type</span><span class='p'>)</span>
+
+    <span class='nx'>graph</span><span class='p'>.</span><span class='nx'>set</span><span class='p'>(</span><span class='s'>&#39;chartType&#39;</span><span class='p'>,</span>  <span class='nx'>graphType</span><span class='p'>)</span>
+    <span class='nx'>graph</span><span class='p'>.</span><span class='nx'>set</span><span class='p'>(</span><span class='s'>&#39;renderToId&#39;</span><span class='p'>,</span> <span class='nx'>render_to</span><span class='p'>)</span>
+    <span class='nx'>graph</span><span class='p'>.</span><span class='nx'>set</span><span class='p'>(</span><span class='s'>&#39;series&#39;</span><span class='p'>,</span>     <span class='nx'>data</span><span class='p'>)</span>
+    <span class='nx'>graph</span><span class='p'>.</span><span class='nx'>set</span><span class='p'>(</span><span class='s'>&#39;categories&#39;</span><span class='p'>,</span> <span class='nx'>categories</span><span class='p'>)</span>
+    <span class='nx'>graph</span><span class='p'>.</span><span class='nx'>set</span><span class='p'>(</span><span class='s'>&#39;title&#39;</span><span class='p'>,</span>      <span class='nx'>title</span><span class='p'>)</span>
+
+    <span class='nx'>graph</span><span class='p'>.</span><span class='nx'>initialize</span><span class='p'>()</span>
+
+    <span class='k'>new</span> <span class='nx'>Highcharts</span><span class='p'>.</span><span class='nx'>Chart</span><span class='p'>(</span><span class='nx'>graph</span><span class='p'>)</span>
+</code></pre></div>
+<p>The <code>graphConfig</code> and <code>graphType</code> functions determine which configuration class and which type to use in the <code>render</code> function.</p>
+
+<p>Then there&#8217;s the view, to be used in your templates:</p>
+<div class='highlight'><pre><code class='coffeescript'><span class='nv'>App.GraphView = </span><span class='nx'>Ember</span><span class='p'>.</span><span class='nx'>View</span><span class='p'>.</span><span class='nx'>extend</span>
+  <span class='nv'>tagName: </span><span class='s'>&#39;div&#39;</span>
+  <span class='nv'>classNames: </span><span class='p'>[</span> <span class='s'>&#39;highcharts&#39;</span> <span class='p'>]</span>
+  <span class='nv'>title: </span><span class='s'>&#39;Graph&#39;</span>
+  <span class='nv'>type: </span><span class='s'>&#39;line&#39;</span>
+
+  <span class='nv'>didInsertElement: </span><span class='nf'>-&gt;</span>
+    <span class='nv'>graph = </span><span class='k'>new</span> <span class='nx'>App</span><span class='p'>.</span><span class='nx'>GraphController</span><span class='p'>()</span>
+    <span class='nx'>graph</span><span class='p'>.</span><span class='nx'>render</span><span class='p'>(</span><span class='nx'>@elementId</span><span class='p'>,</span> <span class='nx'>@type</span><span class='p'>,</span> <span class='nx'>@content</span><span class='p'>,</span> <span class='nx'>@categories</span><span class='p'>,</span> <span class='nx'>@title</span><span class='p'>)</span>
+</code></pre></div>
+<p>Lastly, a subclass of this <code>App.GraphView</code> to render a line graph:</p>
+<div class='highlight'><pre><code class='coffeescript'><span class='nv'>App.LineGraphView = </span><span class='nx'>App</span><span class='p'>.</span><span class='nx'>GraphView</span><span class='p'>.</span><span class='nx'>extend</span>
+  <span class='nv'>type: </span><span class='s'>&#39;line&#39;</span>
+</code></pre></div>
+<p>To actually render a graph, call the <code>App.LineGraphView</code> in your template:</p>
+<div class='highlight'><pre><code class='html'>  App.LineGraphView id=my-graph contentBinding=myData categoriesBinding=myCategories title=&quot;This is a graph&quot;
+</code></pre></div>
+    </div>
+  </body>
+</html>

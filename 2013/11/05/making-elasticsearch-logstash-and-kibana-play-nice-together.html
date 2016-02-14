@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+    <title>Making Elasticsearch, Logstash, and Kibana play nicely together</title>
+    <meta name="viewport" content="width=device-width">
+    <link rel="stylesheet" href="/assets/css/main.css">
+
+    <script type="text/javascript">
+      var _gaq = _gaq || [];
+      _gaq.push(['_setAccount', 'UA-116239-4']);
+      _gaq.push(['_trackPageview']);
+
+      (function() {
+        var ga = document.createElement('script'); ga.type = 'text/javascript'; ga.async = true;
+        ga.src = ('https:' == document.location.protocol ? 'https://ssl' : 'http://www') + '.google-analytics.com/ga.js';
+        var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(ga, s);
+      })();
+    </script>
+  </head>
+
+  <body id="single-post">
+    <div id="sidebar">
+  <div id="photo" class="circular">
+    <img src="/assets/img/me.jpg" alt="Marcel de Graaf" />
+  </div>
+
+  <h1>Marcel de Graaf</h1>
+  <p>Ops Engineer at <a href="https://yourkarma.com">Karma</a>. Drummer. Music enthusiast.</p>
+
+</div>
+
+
+    <div id="content-area">
+      <h2>Making Elasticsearch, Logstash, and Kibana play nicely together</h2>
+
+      <p>As <a href='/2013/06/07/elasticsearch-on-ec2-with-auto-discovery.html'>previously mentioned</a> we are using Elasticsearch at Wakoopa, mainly as a storage backend for our application logs. We currently store about 12 GB of log data per day to Elasticsearch, which translates to roughly 12 million daily log entries. In this post I want to share with you how we set up this log processing system.</p>
+
+<h3 id='elasticsearch'>Elasticsearch</h3>
+
+<p>In my <a href='/2013/06/07/elasticsearch-on-ec2-with-auto-discovery.html'>previous post</a> I&#8217;ve outlined how to install and configure Elasticsearch. One important thing to note is that recently the S3 storage gateway has been deprecated. We have changed our configuration to use the <code>local</code> gateway, using Elastic Block Storage volumes to store the indices. Make sure to have at least one master and one slave node online with this setup, otherwise your shards will not be replicated and you risk data loss in case your single Elasticsearch node goes down.</p>
+
+<p>Another interesting point to make is that we have moved to another Elasticsearch management GUI. We were using Paramedic before but have recently switched to the excellent <a href='https://github.com/royrusso/elasticsearch-HQ'>ElasticHQ</a> plugin. See the Github repo and their website for more info. Installation is easy: run <code>plugin -install royrusso/elasticsearch-HQ</code> from your Elasticsearch <code>bin</code> folder and point your browser to <code>http://your-elasticsearch-host/_plugin/HQ</code>.</p>
+
+<p>So, now that Elasticsearch is running, let&#8217;s proceed with Logstash and Kibana.</p>
+
+<h3 id='logstash'>Logstash</h3>
+
+<p><a href='http://www.elasticsearch.org/overview/logstash'>Logstash</a> (recently acquired by Elasticsearch) is an application that reads log files (and can tail them in real time as they grow), process each line in the file as desired, and outputs the processed line to a storage backend. In our case we are mostly intrested in Rails&#8217; application logs, Resque job logs, and some other custom log files.</p>
+
+<p>The first step in getting Logstash to process a log file is to look at the log format. Logstash is capable of parsing all kinds of log formats. See the <a href='http://logstash.net/docs/1.2.2/filters/grok'>grok</a> filter for a demonstration. However, the more complex this parsing gets, the higher the risk Logstash misinterprets something. Therefore we&#8217;ve chosen to put the responsibility for understandable logs in our applications and write our logs in Logstash format whenever possible. For Rails the excellent <a href='https://github.com/roidrage/lograge'>logstash-event</a> gem (part of Lograge) is an easy way to get Rails to write logs in Logstash format. For Resque we have written our own logging extension which we may open source in the near future.</p>
+
+<p>If you cannot change the log format of a log file that you want Logstash to read, you should take a close look at the <a href='http://logstash.net/docs/1.2.2/filters/grok'>grok</a> filter. You may be able to write a grok filter that makes your log file workable for Logstash.</p>
+
+<p>For each of the log files you want Logstash to read, you should define an <code>input</code>. Logstash supports an enormous collection of inputs, varying from simple files to Redis, SQS, ZeroMQ, a Unix pipe, and many more. See the <a href='http://logstash.net/docs/1.2.2/'>documentation</a> for more details.</p>
+
+<p>Once your inputs are defined you can define filters to be applied to the data Logstash reads. This is not mandatory, but as mentioned earlier you may need a <code>grok</code> filter here to process a log file that Logstash cannot read by itself.</p>
+
+<p>The last thing to define is an <code>output</code>, or multiple outputs. Logstash supports even more outputs than inputs, varying from a file to JIRA, Librato Metrics, RabbitMQ, SQS, and lots more. See the <a href='http://logstash.net/docs/1.2.2/'>documentation</a> for more information.</p>
+
+<p>You&#8217;ll see that Logstash also supports three different <code>elasticsearch</code> outputs, and you may want to use that in your own Logstash configurations. If you do, than the Logstash part is done. Your log files should be processed and each line should end up in Elasticsearch.</p>
+
+<p>We, however, have chosen to use <a href='http://redis.io'>Redis</a> as a queue between all our Logstash collectors and Elasticsearch. That means we use the <code>redis</code> output on every server that has a Logstash client processing logs. This way we can still properly process log files if Elasticsearch happens to be down. Our operation already requires us to have a highly available Redis server, so we found it easier to piggy-back on that existing setup.</p>
+
+<p>To get our log lines out of Redis and into Elasticsearch, we run a Logstash instance on our Elasticsearch master node as well. This instance is configured to use Redis as an input, and outputs to Elasticsearch with the <code>elasticsearch_http</code> output. Nothing fancy going on here.</p>
+
+<p>Now that you&#8217;ve got your stuff in Elasticsearch, let&#8217;s add Kibana to the mix.</p>
+
+<h3 id='kibana'>Kibana</h3>
+
+<p><a href='http://www.elasticsearch.org/overview/kibana'>Kibana</a> is an AngularJS application that acts as a client on Elasticsearch. It can do more than just display and filter Logstash logs, but that is all we use it for. See their website for more information.</p>
+
+<p>Installing Kibana is quite simple; it can be installed as an Elasticsearch plugin. To install the latest version download <a href='http://download.elasticsearch.org/kibana/kibana/kibana-latest.zip'>this ZIP file</a> and extract it to a temporary folder on your Elasticsearch node. Then create a <code>kibana</code> directory in your Elasticsearch&#8217;s <code>plugins</code> directory and move the extracted <code>kibana</code> directory there. Finally, rename the <code>kibana-latest</code> dir in <code>plugins/kibana</code> to <code>_site</code> so Elasticsearch properly loads the plugin in your browser. You should now be able to open Kibana with your browser on <code>http://your-elasticsearch-host/_plugin/kibana</code>.</p>
+
+<h3 id='memory_considerations'>Memory Considerations</h3>
+
+<p>To make sure our Logstash indices don&#8217;t consume all the Elasticsearch node&#8217;s RAM, we use a nightly cron job on the master node to close indices older than two weeks. Simplified, the script run by cron boils down to this:</p>
+<div class='highlight'><pre><code class='ruby'><span class='lineno'> 1</span> <span class='nb'>require</span> <span class='s1'>&#39;tire&#39;</span>
+<span class='lineno'> 2</span> <span class='nb'>require</span> <span class='s1'>&#39;yaml&#39;</span>
+<span class='lineno'> 3</span> 
+<span class='lineno'> 4</span> <span class='no'>CLOSE_THRESHOLD</span> <span class='o'>=</span> <span class='no'>Date</span><span class='o'>.</span><span class='n'>today</span> <span class='o'>-</span> <span class='mi'>14</span>
+<span class='lineno'> 5</span> 
+<span class='lineno'> 6</span> <span class='n'>indices</span> <span class='o'>=</span> <span class='no'>YAML</span><span class='o'>.</span><span class='n'>load</span><span class='p'>(</span><span class='ss'>Tire</span><span class='p'>:</span><span class='ss'>:Configuration</span><span class='o'>.</span><span class='n'>client</span><span class='o'>.</span><span class='n'>get</span><span class='p'>(</span><span class='s2'>&quot;</span><span class='si'>#{</span><span class='ss'>Tire</span><span class='p'>:</span><span class='ss'>:Configuration</span><span class='o'>.</span><span class='n'>url</span><span class='si'>}</span><span class='s2'>/_aliases&quot;</span><span class='p'>)</span><span class='o'>.</span><span class='n'>body</span><span class='p'>)</span><span class='o'>.</span><span class='n'>keys</span>
+<span class='lineno'> 7</span> <span class='n'>logstash_indices</span> <span class='o'>=</span> <span class='n'>indices</span><span class='o'>.</span><span class='n'>select</span> <span class='p'>{</span> <span class='o'>|</span><span class='n'>index</span><span class='o'>|</span> <span class='n'>index</span> <span class='o'>=~</span> <span class='sr'>/logstash-\d{4}.\d{2}.\d{2}/</span> <span class='p'>}</span>
+<span class='lineno'> 8</span> 
+<span class='lineno'> 9</span> <span class='n'>logstash_indices</span><span class='o'>.</span><span class='n'>each</span> <span class='k'>do</span> <span class='o'>|</span><span class='n'>index</span><span class='o'>|</span>
+<span class='lineno'>10</span>   <span class='n'>year</span><span class='p'>,</span> <span class='n'>month</span><span class='p'>,</span> <span class='n'>day</span> <span class='o'>=</span> <span class='n'>index</span><span class='o'>.</span><span class='n'>gsub</span><span class='p'>(</span><span class='s1'>&#39;logstash-&#39;</span><span class='p'>,</span> <span class='s1'>&#39;&#39;</span><span class='p'>)</span><span class='o'>.</span><span class='n'>split</span><span class='p'>(</span><span class='s1'>&#39;.&#39;</span><span class='p'>)</span><span class='o'>.</span><span class='n'>map</span><span class='p'>(</span><span class='o'>&amp;</span><span class='ss'>:to_i</span><span class='p'>)</span>
+<span class='lineno'>11</span>   <span class='n'>date</span> <span class='o'>=</span> <span class='no'>Date</span><span class='o'>.</span><span class='n'>new</span><span class='p'>(</span><span class='n'>year</span><span class='p'>,</span> <span class='n'>month</span><span class='p'>,</span> <span class='n'>day</span><span class='p'>)</span>
+<span class='lineno'>12</span> 
+<span class='lineno'>13</span>   <span class='n'>tire_index</span> <span class='o'>=</span> <span class='ss'>Tire</span><span class='p'>:</span><span class='ss'>:Index</span><span class='o'>.</span><span class='n'>new</span><span class='p'>(</span><span class='n'>index</span><span class='p'>)</span>
+<span class='lineno'>14</span> 
+<span class='lineno'>15</span>   <span class='k'>if</span> <span class='n'>date</span> <span class='o'>&lt;</span> <span class='no'>CLOSE_THRESHOLD</span>
+<span class='lineno'>16</span>     <span class='n'>tire_index</span><span class='o'>.</span><span class='n'>close</span>
+<span class='lineno'>17</span>   <span class='k'>end</span>
+<span class='lineno'>18</span> <span class='k'>end</span>
+</code></pre></div>
+<p>We&#8217;re typically not interested in logs older than two weeks. If we are, we can easily re-open the relevant indices from the ElasticHQ GUI. The cron script will close them again automatically the next night.</p>
+
+<h3 id='closing_words'>Closing Words</h3>
+
+<p>Using the above setup we are able to comfortably process and store about 12 GB of log data per day on two <code>m1.medium</code> EC2 instances and a few EBS volumes. Using Redis as a queue means we don&#8217;t need to panic if one of the Elasticsearch nodes is temporarily unreachable.</p>
+
+<p>If you want to know more about our setup, or need help getting your stack running: feel free to <a href='mailto:mail@marceldegraaf.net'>send me an email</a> or ping me on Twitter <a href='http://twitter.com/marceldegraaf'>@marceldegraaf</a>.</p>
+    </div>
+  </body>
+</html>

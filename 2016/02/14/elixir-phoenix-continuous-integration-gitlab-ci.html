@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+    <title>Elixir and Phoenix: continuous integration on Gitlab CI</title>
+    <meta name="viewport" content="width=device-width">
+    <link rel="stylesheet" href="/assets/css/main.css">
+
+    <script type="text/javascript">
+      var _gaq = _gaq || [];
+      _gaq.push(['_setAccount', 'UA-116239-4']);
+      _gaq.push(['_trackPageview']);
+
+      (function() {
+        var ga = document.createElement('script'); ga.type = 'text/javascript'; ga.async = true;
+        ga.src = ('https:' == document.location.protocol ? 'https://ssl' : 'http://www') + '.google-analytics.com/ga.js';
+        var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(ga, s);
+      })();
+    </script>
+  </head>
+
+  <body id="single-post">
+    <div id="sidebar">
+  <div id="photo" class="circular">
+    <img src="/assets/img/me.jpg" alt="Marcel de Graaf" />
+  </div>
+
+  <h1>Marcel de Graaf</h1>
+  <p>Ops Engineer at <a href="https://yourkarma.com">Karma</a>. Drummer. Music enthusiast.</p>
+
+</div>
+
+
+    <div id="content-area">
+      <h2>Elixir and Phoenix: continuous integration on Gitlab CI</h2>
+
+      <p>Recently I was introduced to <a href='http://elixir-lang.org/'>Elixir</a> and <a href='http://www.phoenixframework.org/'>Phoenix</a> (thanks <a href='https://twitter.com/smeevil'>@smeevil</a>) and I&#8217;ve been playing around with that for the last few days. The functional programming takes some getting used to, but the quality of the tools and documentation are astounding and it&#8217;s lots of fun to write a web application with Phoenix.</p>
+
+<p>As a fun &#8220;real world&#8221; exercise I&#8217;m writing a simple web shop in Phoenix, as that touches on almost any aspect of web development: database interaction, frontend, backend, styling, image uploads, etcetera.</p>
+
+<p>Of course I&#8217;m also writing tests for my mockup shop, and I thought it would be nice to try and hook these up to <a href='https://about.gitlab.com/gitlab-ci/'>Gitlab CI</a>.</p>
+
+<p>In this article you&#8217;ll learn how to configure your Elixir/Phoenix project for continuous integration with Gitlab CI, including integration tests with <a href='https://github.com/HashNuke/hound'>Hound</a> and <a href='http://phantomjs.org/'>PhantomJS</a>.</p>
+
+<h3 id='setting_up_gitlab_ci'>Setting up Gitlab CI</h3>
+
+<p>To run your tests on Gitlab CI, you&#8217;ll need a <code>.gitlab-ci.yml</code> file in the root of your project. You&#8217;ll also need a Gitlab instance to run your tests on; <a href='http://doc.gitlab.com/ce/ci/'>their documentation</a> has all the details.</p>
+
+<p>I&#8217;m using the <a href='http://doc.gitlab.com/ce/ci/docker/using_docker_images.html'>Docker runner</a> to run my tests locally. This is my <code>.gitlab-ci.yml</code>:</p>
+<div class='highlight'><pre><code class='yaml'><span class='l-Scalar-Plain'>image</span><span class='p-Indicator'>:</span> <span class='s'>&quot;marceldegraaf/elixir&quot;</span>
+<span class='l-Scalar-Plain'>services</span><span class='p-Indicator'>:</span>
+  <span class='p-Indicator'>-</span> <span class='s'>&quot;postgres:latest&quot;</span>
+
+<span class='l-Scalar-Plain'>variables</span><span class='p-Indicator'>:</span>
+  <span class='l-Scalar-Plain'>POSTGRES_DB</span><span class='p-Indicator'>:</span> <span class='l-Scalar-Plain'>shop_test</span>
+  <span class='l-Scalar-Plain'>POSTGRES_USER</span><span class='p-Indicator'>:</span> <span class='l-Scalar-Plain'>postgres</span>
+  <span class='l-Scalar-Plain'>POSTGRES_PASSWORD</span><span class='p-Indicator'>:</span> <span class='s'>&quot;&quot;</span>
+  <span class='l-Scalar-Plain'>MIX_ENV</span><span class='p-Indicator'>:</span> <span class='l-Scalar-Plain'>test</span>
+
+<span class='l-Scalar-Plain'>before_script</span><span class='p-Indicator'>:</span>
+  <span class='p-Indicator'>-</span> <span class='s'>&quot;phantomjs</span><span class='nv'> </span><span class='s'>--wd</span><span class='nv'> </span><span class='s'>--webdriver-logfile=/tmp/phantomjs.log</span><span class='nv'> </span><span class='s'>&gt;</span><span class='nv'> </span><span class='s'>/dev/null</span><span class='nv'> </span><span class='s'>2&gt;&amp;1</span><span class='nv'> </span><span class='s'>&amp;&quot;</span>
+  <span class='p-Indicator'>-</span> <span class='l-Scalar-Plain'>cp config/test.exs.ci config/test.exs</span>
+  <span class='p-Indicator'>-</span> <span class='l-Scalar-Plain'>mix deps.get</span>
+  <span class='p-Indicator'>-</span> <span class='l-Scalar-Plain'>mix ecto.create</span>
+  <span class='p-Indicator'>-</span> <span class='l-Scalar-Plain'>mix ecto.migrate</span>
+
+<span class='l-Scalar-Plain'>stages</span><span class='p-Indicator'>:</span>
+  <span class='p-Indicator'>-</span> <span class='l-Scalar-Plain'>test</span>
+
+<span class='l-Scalar-Plain'>job</span><span class='p-Indicator'>:</span>
+  <span class='l-Scalar-Plain'>stage</span><span class='p-Indicator'>:</span> <span class='l-Scalar-Plain'>test</span>
+  <span class='l-Scalar-Plain'>script</span><span class='p-Indicator'>:</span>
+    <span class='p-Indicator'>-</span> <span class='l-Scalar-Plain'>mix test</span>
+  <span class='l-Scalar-Plain'>artifacts</span><span class='p-Indicator'>:</span>
+    <span class='l-Scalar-Plain'>paths</span><span class='p-Indicator'>:</span>
+      <span class='p-Indicator'>-</span> <span class='l-Scalar-Plain'>tmp/screenshots</span>
+  <span class='l-Scalar-Plain'>cache</span><span class='p-Indicator'>:</span>
+    <span class='l-Scalar-Plain'>paths</span><span class='p-Indicator'>:</span>
+      <span class='p-Indicator'>-</span> <span class='s'>&quot;_build&quot;</span>
+      <span class='p-Indicator'>-</span> <span class='s'>&quot;deps&quot;</span>
+</code></pre></div>
+<p>The <code>marceldegraaf/elixir</code> image contains an Erlang VM with Elixir pre-installed, and also comes with PhantomJS to make testing with Hound possible.</p>
+
+<p>As you can see, in the <code>before_script</code> section we first start PhantomJS in webdriver mode, and then prepare the application for running our tests. The actual test commands are in <code>job.script</code>; in this case I just run <code>mix test</code> to run my test files.</p>
+
+<p>To run integration tests I&#8217;m using Hound, using the PhantomJS driver. I&#8217;ve added a <code>test/integration</code> folder to my Phoenix project. A simple home page integration test could look like this:</p>
+<div class='highlight'><pre><code class='elixir'><span class='k'>defmodule</span> <span class='no'>Shop</span><span class='o'>.</span><span class='no'>HomePageTest</span> <span class='k'>do</span>
+<span class='k'>  </span><span class='kn'>use</span> <span class='no'>ExUnit</span><span class='o'>.</span><span class='no'>Case</span>
+  <span class='kn'>use</span> <span class='no'>Hound</span><span class='o'>.</span><span class='no'>Helpers</span>
+
+  <span class='n'>hound_session</span>
+
+  <span class='n'>test</span> <span class='s2'>&quot;page title&quot;</span> <span class='k'>do</span>
+<span class='k'>    </span><span class='n'>navigate_to</span> <span class='s2'>&quot;/&quot;</span>
+
+    <span class='n'>assert</span> <span class='n'>find_element</span><span class='p'>(</span><span class='ss'>:tag</span><span class='p'>,</span> <span class='s2'>&quot;h1&quot;</span><span class='p'>)</span> <span class='o'>|&gt;</span> <span class='n'>inner_html</span> <span class='o'>==</span> <span class='s2'>&quot;Welcome to our shop&quot;</span>
+  <span class='k'>end</span>
+<span class='k'>end</span>
+</code></pre></div>
+<p>To make sure Hound uses the PhantomJS webdriver, I&#8217;ve added this to my <code>config/test.exs</code> file:</p>
+<div class='highlight'><pre><code class='elixir'><span class='n'>config</span> <span class='ss'>:hound</span><span class='p'>,</span>
+  <span class='ss'>driver:</span> <span class='s2'>&quot;phantomjs&quot;</span>
+</code></pre></div>
+<p>If you run these tests locally, make sure to start PhantomJS before running <code>mix test</code>, or Hound will trow errors for not being able to reach the webdriver.</p>
+    </div>
+  </body>
+</html>

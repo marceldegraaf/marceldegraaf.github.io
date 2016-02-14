@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+    <title>Experimenting with CoreOS, confd, etcd, fleet, and CloudFormation</title>
+    <meta name="viewport" content="width=device-width">
+    <link rel="stylesheet" href="/assets/css/main.css">
+
+    <script type="text/javascript">
+      var _gaq = _gaq || [];
+      _gaq.push(['_setAccount', 'UA-116239-4']);
+      _gaq.push(['_trackPageview']);
+
+      (function() {
+        var ga = document.createElement('script'); ga.type = 'text/javascript'; ga.async = true;
+        ga.src = ('https:' == document.location.protocol ? 'https://ssl' : 'http://www') + '.google-analytics.com/ga.js';
+        var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(ga, s);
+      })();
+    </script>
+  </head>
+
+  <body id="single-post">
+    <div id="sidebar">
+  <div id="photo" class="circular">
+    <img src="/assets/img/me.jpg" alt="Marcel de Graaf" />
+  </div>
+
+  <h1>Marcel de Graaf</h1>
+  <p>Ops Engineer at <a href="https://yourkarma.com">Karma</a>. Drummer. Music enthusiast.</p>
+
+</div>
+
+
+    <div id="content-area">
+      <h2>Experimenting with CoreOS, confd, etcd, fleet, and CloudFormation</h2>
+
+      <p>One of my jobs at <a href='https://wakoopa.com'>Wakoopa</a> is to manage our technical infrastructure, on top of Amazon Web Services. And although all developers in our team share some of that responsibility, I&#8217;m usually the one to implement and update our CloudFormation stacks and our Chef cookbooks, and investigate new developments in this field.</p>
+
+<p>Today I want to walk you through my experiments with CoreOS, confd, etcd, fleet, and CloudFormation. I&#8217;m very excited about these tools and I hope to share that excitement with you :-).</p>
+
+<p>All the code for these experiments is in <a href='https://github.com/marceldegraaf/blog-coreos-1'>this repo</a>. If you want to comment on this article, or you run into issues with the walkthrough below, please <a href='mailto:mail@marceldegraaf.net'>email me</a> or <a href='https://twitter.com/marceldegraaf'>ping me</a> on Twitter.</p>
+
+<h4 id='updates'>Updates</h4>
+
+<p>2014-04-30 – thanks to <a href='https://twitter.com/brianhicks/status/461528976070963200'>@brianhicks</a> and <a href='https://news.ycombinator.com/item?id=7674287'>bacongobbler</a> I&#8217;ve replaced all the grep/awk voodoo to get the host IP with a simple solution based on environment variables from <code>/etc/environment</code>. The code samples below have been updated, along with the systemd unit files in <a href='https://github.com/marceldegraaf/blog-coreos-1'>the repository</a>.</p>
+
+<p>2014-05-01 – thanks to <a href='https://github.com/marceldegraaf/blog-coreos-1/commit/9460d99a7bedfb517d94084f35539052cb550a62#commitcomment-6174324'>@brianhicks</a> I&#8217;ve removed the calls to <code>/bin/bash</code> in the systemd unit files, and now just call the required process right away. The <code>$COREOS_PUBLIC_IPV4</code> variable gets substituted in with <code>${...}</code>.</p>
+
+<p>2014-05-02 – updated the <code>fleetctl submit</code> commands to include <code>start</code> as well. When I started writing this article I was using an alpha version of fleetctl that automatically starts submitted units. The article has been updated to reflect the commands that work with the currently stable version of fleetctl (0.2.0).</p>
+
+<p>2014-05-03 – part 2 of this article is up: <a href='http://marceldegraaf.net/2014/05/05/coreos-follow-up-sinatra-logstash-elasticsearch-kibana.html'>CoreOS follow-up: Sinatra, Logstash, Elasticsearch, and Kibana</a></p>
+
+<p>2014-05-12 – added some remarks and added <code>.service</code> suffixes to inline <code>fleetctl</code> commands. Thanks to <a href='https://twitter.com/scottynomad'>Scott Wilson</a>.</p>
+
+<h3 id='introduction'>Introduction</h3>
+
+<p>So, what are CoreOS, confd, etcd, fleet, and CloudFormation? Let me introduce them to you real quick:</p>
+
+<ul>
+<li>
+<p><a href='https://coreos.com/'><strong>CoreOS</strong></a> is a minimal Linux-based operating system aimed at large-scale server deployments. CoreOS is written with scalability and security in mind. Next to that it is stongly biased towards Docker: every process running on a CoreOS server should be running in a Docker container. CoreOS comes with Docker and etcd pre-installed.</p>
+</li>
+
+<li>
+<p><a href='https://docker.io/'><strong>Docker</strong></a> is a platform to create light-weight, stand-alone, containers from any application. It allows you to run processes in a pseudo-VM that boots extremely fast (under 1 second) and isolates all its resources.</p>
+</li>
+
+<li>
+<p><a href='https://github.com/kelseyhightower/confd'><strong>confd</strong></a> is a configuration management tool built on top of <strong>etcd</strong>. Confd can watch certain keys in etcd, and update the related configuration files as soon as the key changes. After that, confd can reload or restart applications related to the updated configuration files. This allows you to automate configuration changes to all the servers in your cluster, and makes sure all services are always looking at the latest configuration.</p>
+</li>
+
+<li>
+<p><a href='https://github.com/coreos/etcd'><strong>etcd</strong></a> is a highly available, distributed key/value store that is built to distribute configuration updates to all the servers in your cluster. Next to that it can be used for service discovery, or basically for any other distributed key/value based process that applies to your situation.</p>
+
+<p><a href='https://coreos.com/using-coreos/etcd/'>Read more</a> about how etcd works.</p>
+</li>
+
+<li>
+<p><a href='https://coreos.com/using-coreos/systemd/'><strong>fleet</strong></a> is a layer on top of <a href='http://www.freedesktop.org/wiki/Software/systemd/'><strong>systemd</strong></a>, the well-known init system. Fleet basically lets you manage your services on any server in your cluster transparently, and gives you some convenient tools to inspect the state of your services.</p>
+</li>
+
+<li>
+<p><a href='https://aws.amazon.com/cloudformation/'><strong>CloudFormation</strong></a> is part of the Amazon Web Services suite. It is a tool that automates setting up a full application stack. You describe all the AWS resources your stack needs in JSON format, and upload that JSON file to CloudFormation. CloudFormation inspects the JSON file and creates all the requested AWS resources in the right order. There are two great advantages to using CloudFormation over manually creating your AWS resources:</p>
+
+<ul>
+<li>The JSON file that describes your stack can be managed by source control</li>
+
+<li>Once you delete your stack all related resources are deleted automatically, leaving you with a nicely cleaned up AWS account</li>
+</ul>
+</li>
+</ul>
+
+<p>The big question is: can we make all these tools play nicely together? If we could, we would have a very sturdy base environment that could be used to host applications of any kind, and scale virtually endlessly.</p>
+
+<h3 id='following_along'>Following along</h3>
+
+<p>For the rest of this article I assume you&#8217;ve got access to the <code>docker</code> and <code>fleetctl</code> commands, either on a (Vagrant) virtual machine or on your workstation. Follow the respective guides with installation instructions for your platform, and make sure you have an AWS account. Then return here to follow along with me :-).</p>
+
+<h3 id='cloudformation_stack'>CloudFormation stack</h3>
+
+<p>Let&#8217;s start with creating a CloudFormation stack, consisting of a few EC2 instances and a security group that gives the instances access to each others <strong>etcd</strong> daemons. This security group will also give you access to each of the instances via SSH.</p>
+
+<p>I&#8217;ve used <a href='https://github.com/marceldegraaf/blog-coreos-1/blob/master/stack.yml'>this stack definition</a>. As you can see it&#8217;s in YAML format for readability. The JSON version is <a href='https://github.com/marceldegraaf/blog-coreos-1/blob/master/stack.json'>here</a>. If you update the YAML version of the stack, use this shell command to parse it into JSON, assuming you have Ruby installed and your YAML file is called <code>stack.yml</code>:</p>
+<div class='highlight'><pre><code class='bash'>ruby -r json -r yaml -e <span class='s2'>&quot;yaml = YAML.load(File.read(&#39;./stack.yml&#39;)); print yaml.to_json&quot;</span> &gt; stack.json
+</code></pre></div>
+<p>Sign in to the AWS dashboard, open the CloudFormation page and click <strong>Create Stack</strong>. Enter a name, select your <code>stack.json</code> file, fill in the requested fields and launch your stack. You should see your stack being created on the CloudFormation page, eventually reaching the <code>CREATE_COMPLETE</code> state. This means your stack is done.</p>
+
+<p>You should now have a few EC2 instances running CoreOS, ready to do work for you.</p>
+
+<p><strong>Note</strong>: at the time of writing there <a href='https://github.com/coreos/bugs/issues/3'>is a bug</a> in CoreOS that causes your EC2 instance&#8217;s disk space to not be properly resized after booting. The workaround is to run this command on each of the EC2 instances in your fleet, via SSH:</p>
+<div class='highlight'><pre><code class='bash'>sudo btrfs filesystem resize 1:max /
+</code></pre></div>
+<h3 id='first_steps'>First steps</h3>
+
+<p>To control your cluster with <strong>fleet</strong>, you use the <code>fleetctl</code> command. As you can read <a href='https://github.com/coreos/fleet/blob/master/Documentation/security.md'>here</a>, fleet has no built-in security mechanism. If you want to use <code>fleetctl</code> from your workstation, you need to configure fleet to use an SSH tunnel. I found that an easy way to do this is to configure the SSH user and private key in <code>~/.ssh/config</code> and then export the <code>FLEETCTL_TUNNEL</code> variable on the command line. Like so:</p>
+<div class='highlight'><pre><code class='bash'>Host coreos
+  User     core
+  HostName &lt;ip-of-a-cluster-instance&gt;
+  IdentityFile ~/.ssh/your_aws_private_key.pem
+</code></pre></div>
+<p>And:</p>
+<div class='highlight'><pre><code class='bash'><span class='nb'>export </span><span class='nv'>FLEETCTL_TUNNEL</span><span class='o'>=</span>&lt;ip-of-a-cluster-instance&gt;
+</code></pre></div>
+<p>It doesn&#8217;t matter which instance you use as the other end of your SSH tunnel, as long as you use the EC2 instance&#8217;s public IP address. Of course the IP address in your SSH config must be the same as what you export in the environment variable.</p>
+
+<p>Also, make sure to add your private key to ssh-agent, to make sure the ssh commands work:</p>
+<div class='highlight'><pre><code class='bash'>ssh-add ~/.ssh/your_aws_private_key.pem
+</code></pre></div>
+<p>Once you&#8217;ve done this, the following command:</p>
+<div class='highlight'><pre><code class='bash'>fleetctl list-machines
+</code></pre></div>
+<p>Should show you the servers in your cluster:</p>
+<div class='highlight'><pre><code class='bash'>MACHINE     IP              METADATA
+015a6f3a... 10.104.242.206  -
+3588db25... 10.73.200.139   -
+</code></pre></div>
+<h3 id='hello_world_with_etcd_deregistration'>&#8220;Hello World&#8221; with etcd (de)registration</h3>
+
+<p>The following code describes a &#8220;Hello World&#8221; service that runs an eternal <code>while</code> loop in a Docker container. It does more than that though: before starting and before stopping the container, the application registers itself with etcd. This is the code:</p>
+<div class='highlight'><pre><code class='ini'><span class='lineno'> 1</span> <span class='k'>[Unit]</span>
+<span class='lineno'> 2</span> <span class='na'>Description</span><span class='o'>=</span><span class='s'>Hello World</span>
+<span class='lineno'> 3</span> <span class='na'>After</span><span class='o'>=</span><span class='s'>docker.service</span>
+<span class='lineno'> 4</span> <span class='na'>Requires</span><span class='o'>=</span><span class='s'>docker.service</span>
+<span class='lineno'> 5</span> 
+<span class='lineno'> 6</span> <span class='k'>[Service]</span>
+<span class='lineno'> 7</span> <span class='na'>EnvironmentFile</span><span class='o'>=</span><span class='s'>/etc/environment</span>
+<span class='lineno'> 8</span> <span class='na'>ExecStartPre</span><span class='o'>=</span><span class='s'>/usr/bin/etcdctl set /test/%m ${COREOS_PUBLIC_IPV4}</span>
+<span class='lineno'> 9</span> <span class='na'>ExecStart</span><span class='o'>=</span><span class='s'>/usr/bin/docker run --name test --rm busybox /bin/sh -c &quot;while true; do echo Hello World; sleep 1; done&quot;</span>
+<span class='lineno'>10</span> <span class='na'>ExecStop</span><span class='o'>=</span><span class='s'>/usr/bin/etcdctl rm /test/%m</span>
+<span class='lineno'>11</span> <span class='na'>ExecStop</span><span class='o'>=</span><span class='s'>/usr/bin/docker kill test</span>
+</code></pre></div>
+<p>Let&#8217;s go through that line by line:</p>
+
+<ol>
+<li>The <code>[Unit]</code> header</li>
+
+<li>A description for this unit</li>
+
+<li>Tells systemd to start this unit after <code>docker.service</code></li>
+
+<li>Tells systemd that this unit needs <code>docker.service</code> to operate properly</li>
+
+<li>An empty line ;-)</li>
+
+<li>The <code>[Service]</code> header</li>
+
+<li>Reads the file <code>/etc/environment</code> and exposes its environment variables to the current unit file</li>
+
+<li><code>ExecStartPre</code> runs before the service is started. The line <code>/usr/bin/etcdctl set /test/%m ${COREOS_PUBLIC_IPV4}</code> creates a key in etcd with the name of the unique machine ID (expanded from <code>%m</code> in systemd) and the machine&#8217;s public IP as value (this variable comes from the <code>/etc/environment</code> file). This key/value pair in etcd is useful for the Sinatra and nginx part below. <strong>Note</strong>: Make sure to replace this with <code>COREOS_PRIVATE_IPV4</code> if you&#8217;re running in a VPC on EC2.</li>
+
+<li><code>ExecStart</code> starts the actual service. This is a vanilla Docker command.</li>
+
+<li>The first <code>ExecStop</code> deregisters the <code>/test/&lt;machine-id&gt;</code> key from etcd</li>
+
+<li>The second <code>ExecStop</code> kills the actual Docker container.</li>
+</ol>
+
+<p>To run this service, save it to a file called <code>hello.service</code>, submit it to your fleet with <code>fleetctl</code> and start it:</p>
+<div class='highlight'><pre><code class='bash'>fleetctl submit hello.service
+fleetctl start hello.service
+</code></pre></div>
+<p>If you now call <code>fleetctl list-units</code>, you should see your service running:</p>
+<div class='highlight'><pre><code class='bash'>UNIT            STATE   LOAD    ACTIVE  SUB     DESC        MACHINE
+hello.service   loaded  loaded  active  running Hello World a2ada91b.../172.17.8.102
+</code></pre></div>
+<p>To see the output of the service, call <code>fleetctl journal hello.service</code>:</p>
+<div class='highlight'><pre><code class='bash'>-- Logs begin at Thu 2014-04-24 13:18:12 UTC, end at Fri 2014-04-25 09:50:50 UTC. --
+Apr 25 09:50:40 core-02 docker<span class='o'>[</span>7565<span class='o'>]</span>: Hello World
+Apr 25 09:50:41 core-02 docker<span class='o'>[</span>7565<span class='o'>]</span>: Hello World
+Apr 25 09:50:42 core-02 docker<span class='o'>[</span>7565<span class='o'>]</span>: Hello World
+Apr 25 09:50:43 core-02 docker<span class='o'>[</span>7565<span class='o'>]</span>: Hello World
+...
+</code></pre></div>
+<p>Note that <code>journal</code> accepts a <code>-f</code> flag, which streams the output of the service to your terminal in real time. To see the status of the service, call <code>fleetctl status hello.service</code>:</p>
+<div class='highlight'><pre><code class='bash'>● hello.service - Hello World
+   Loaded: loaded <span class='o'>(</span>/run/systemd/system/hello.service; static<span class='o'>)</span>
+   Active: active <span class='o'>(</span>running<span class='o'>)</span> since Fri 2014-04-25 09:49:33 UTC; 1min 57s ago
+  Process: 7035 <span class='nv'>ExecStartPre</span><span class='o'>=</span>/usr/bin/etcdctl <span class='nb'>set</span> /test/%m <span class='k'>${</span><span class='nv'>COREOS_PUBLIC_IPV4</span><span class='k'>}</span> <span class='o'>(</span><span class='nv'>code</span><span class='o'>=</span>exited, <span class='nv'>status</span><span class='o'>=</span>0/SUCCESS<span class='o'>)</span>
+ Main PID: 7041 <span class='o'>(</span>docker<span class='o'>)</span>
+   CGroup: /system.slice/test.service
+           └─7041 /usr/bin/docker run --name <span class='nb'>test</span> --rm busybox /bin/sh -c <span class='k'>while </span><span class='nb'>true</span>; <span class='k'>do </span><span class='nb'>echo </span>Hello World; sleep 1; <span class='k'>done</span>
+</code></pre></div>
+<p>Now that we&#8217;ve got a simple &#8220;Hello World&#8221; application running with etcd (de)registration, it&#8217;s time to move on to something interesting: multiple Sinatra services and an nginx proxy that automatically adds/removes upstream servers based on the presence of the Sinatra services.</p>
+
+<h3 id='sinatra_and_etcd'>Sinatra and etcd</h3>
+
+<p>For the purpose of this experiment I&#8217;ve created a very simple Docker container that runs an &#8220;Hello world&#8221; app in <a href='http://www.sinatrarb.com/'>Sinatra</a>. The image has been pushed to the Docker Index, so you can use it with <code>docker pull marceldegraaf/sinatra</code>.</p>
+
+<p>The inspiration for this example is the <a href='https://coreos.com/docs/launching-containers/launching/fleet-example-deployment/'><strong><em>Fleet Example Deployment</em></strong></a> page in the CoreOS documentation.</p>
+
+<p>To run this container on our cluster, we need to define a systemd service that will start Docker with this image. This is the service definition. I&#8217;ve saved it to a file called <code>sinatra.service</code>:</p>
+<div class='highlight'><pre><code class='ini'><span class='lineno'> 1</span> <span class='k'>[Unit]</span>
+<span class='lineno'> 2</span> <span class='na'>Description</span><span class='o'>=</span><span class='s'>sinatra</span>
+<span class='lineno'> 3</span> 
+<span class='lineno'> 4</span> <span class='k'>[Service]</span>
+<span class='lineno'> 5</span> <span class='na'>EnvironmentFile</span><span class='o'>=</span><span class='s'>/etc/environment</span>
+<span class='lineno'> 6</span> <span class='na'>ExecStartPre</span><span class='o'>=</span><span class='s'>/usr/bin/docker pull marceldegraaf/sinatra</span>
+<span class='lineno'> 7</span> <span class='na'>ExecStart</span><span class='o'>=</span><span class='s'>/usr/bin/docker run --name sinatra-%i --rm -p %i:5000 -e PORT=5000 marceldegraaf/sinatra</span>
+<span class='lineno'> 8</span> <span class='na'>ExecStartPost</span><span class='o'>=</span><span class='s'>/usr/bin/etcdctl set /app/server/%i ${COREOS_PUBLIC_IPV4}:%i</span>
+<span class='lineno'> 9</span> <span class='na'>ExecStop</span><span class='o'>=</span><span class='s'>/usr/bin/docker kill sinatra-%i</span>
+<span class='lineno'>10</span> <span class='na'>ExecStopPost</span><span class='o'>=</span><span class='s'>/usr/bin/etcdctl rm /app/server/%i</span>
+<span class='lineno'>11</span> 
+<span class='lineno'>12</span> <span class='k'>[X-Fleet]</span>
+<span class='lineno'>13</span> <span class='na'>X-Conflicts</span><span class='o'>=</span><span class='s'>sinatra@%i.service</span>
+</code></pre></div>
+<p>As you can see we use the <code>%i</code> specifier as a placeholder for the port number. This is used for a nice feature of systemd: if the service description filename contains an <code>@</code>, the part before the <code>@</code> is available in the service file as <code>%p</code>. The part after the <code>@</code> is available as <code>%i</code>, which is what we&#8217;re doing here. Now, you&#8217;ll probably think: &#8220;how does this work, as the service is saved to a file called <code>sinatra.service</code>, without an <code>@</code>?&#8221;. The neat thing is that we can create an arbitrary amount of symlinks to this single service file, each of the symlinks having a different port number after the <code>@</code> in the filename. So, in concreto, I made the following symlinks:</p>
+<div class='highlight'><pre><code class='bash'>-rw-r--r--  1 mdg  staff  510 Apr 26 16:04 sinatra.service
+lrwxr-xr-x  1 mdg  staff   15 Apr 26 15:21 sinatra@5000.service -&gt; sinatra.service
+lrwxr-xr-x  1 mdg  staff   15 Apr 26 14:56 sinatra@5001.service -&gt; sinatra.service
+</code></pre></div>
+<p>As you can guess, this defines two Sinatra services: one available on port 5000 of the host, one on port 5001 of the host. To start these services in your cluster, first submit them with <code>fleetctl</code>:</p>
+<div class='highlight'><pre><code class='bash'>fleetctl submit sinatra@5000.service
+fleetctl start sinatra@5000.service
+
+fleetctl submit sinatra@5001.service
+fleetctl start sinatra@5001.service
+</code></pre></div>
+<p>You should now see your Sinatra services running with <code>fleetctl list-units</code>.</p>
+
+<p>As you can see we start a Docker container with the name <code>sinatra</code> (line 2), and forward port 5000 or 5001 on the Docker host to port 5000 of the Docker container. This is where the Thin webserver is running the simple Sinatra app.</p>
+
+<p>Note the <code>X-Conflicts</code> statement in the <code>[X-Fleet]</code> section (line 12). This tells fleet to run only one Sinatra service with the same port per host machine.</p>
+
+<p>On line 7 of the service file we register the Sinatra service with etcd. In this case, we write a key called <code>/app/server/&lt;port&gt;</code> with a value of <code>&lt;host-ip&gt;:&lt;port&gt;</code>.</p>
+
+<p>If you log in to one of your machines via SSH, you can verify if the Sinatra services have registered themselves in etcd. <code>etcdctl ls --recursive /app/server</code> should list your two ports:</p>
+<div class='highlight'><pre><code class='bash'>/app
+/app/server
+/app/server/5000
+/app/server/5001
+</code></pre></div>
+<p>If you were to kill one of the Sinatra services (with <code>fleetctl destroy sinatra@&lt;port&gt;.service</code>) you would see that one entry disappears from etcd. If you submit it again, it sould re-register itself. Quite neat!</p>
+
+<p>The next step is to add Nginx to the mix, to act as a dynamic proxy in front of these Sinatra services.</p>
+
+<h3 id='nginx_and_etcd'>Nginx and etcd</h3>
+
+<p>Lets start with creating a simple nginx service that we&#8217;ll start with <code>fleetctl</code>:</p>
+<div class='highlight'><pre><code class='ini'><span class='lineno'> 1</span> <span class='k'>[Unit]</span>
+<span class='lineno'> 2</span> <span class='na'>Description</span><span class='o'>=</span><span class='s'>nginx</span>
+<span class='lineno'> 3</span> 
+<span class='lineno'> 4</span> <span class='k'>[Service]</span>
+<span class='lineno'> 5</span> <span class='na'>EnvironmentFile</span><span class='o'>=</span><span class='s'>/etc/environment</span>
+<span class='lineno'> 6</span> <span class='na'>ExecStartPre</span><span class='o'>=</span><span class='s'>/usr/bin/docker pull marceldegraaf/nginx</span>
+<span class='lineno'> 7</span> <span class='na'>ExecStart</span><span class='o'>=</span><span class='s'>/usr/bin/docker run --rm --name nginx -p 80:80 -e HOST_IP=${COREOS_PUBLIC_IPV4} marceldegraaf/nginx</span>
+<span class='lineno'> 8</span> <span class='na'>ExecStop</span><span class='o'>=</span><span class='s'>/usr/bin/docker kill nginx</span>
+<span class='lineno'> 9</span> 
+<span class='lineno'>10</span> <span class='k'>[X-Fleet]</span>
+<span class='lineno'>11</span> <span class='na'>X-Conflicts</span><span class='o'>=</span><span class='s'>nginx.service</span>
+</code></pre></div>
+<p>As you can see the container uses my <code>marceldegraaf/nginx</code> Docker repository. The source files for that repository are <a href='https://github.com/marceldegraaf/blog-coreos-1/tree/master/nginx'>here</a>. Before I walk you through how the automated service discovery works, let&#8217;s start the nginx service:</p>
+<div class='highlight'><pre><code class='bash'>fleetctl submit nginx.service
+fleetctl start nginx.service
+</code></pre></div>
+<p>The magic happens in <code>boot.sh</code>. This is where confd comes into play. When the container boots, it runs <code>boot.sh</code>, which does some interesting things:</p>
+<div class='highlight'><pre><code class='bash'><span class='k'>until </span>confd -onetime -node <span class='nv'>$ETCD</span> -config-file /etc/confd/conf.d/nginx.toml; <span class='k'>do</span>
+<span class='k'>  </span><span class='nb'>echo</span> <span class='s2'>&quot;[nginx] waiting for confd to refresh nginx.conf&quot;</span>
+  sleep 5
+<span class='k'>done</span>
+</code></pre></div>
+<p>This code runs an endless loop, waiting for confd to do an initial update of the <code>nginx.conf</code> template. It uses <code>nginx.toml</code> as the confd configuration file. That file looks like this:</p>
+<div class='highlight'><pre><code class='ini'><span class='lineno'>1</span> <span class='k'>[template]</span>
+<span class='lineno'>2</span> <span class='na'>keys</span>        <span class='o'>=</span> <span class='s'>[ &quot;app/server&quot; ]</span>
+<span class='lineno'>3</span> <span class='na'>owner</span>       <span class='o'>=</span> <span class='s'>&quot;nginx&quot;</span>
+<span class='lineno'>4</span> <span class='na'>mode</span>        <span class='o'>=</span> <span class='s'>&quot;0644&quot;</span>
+<span class='lineno'>5</span> <span class='na'>src</span>         <span class='o'>=</span> <span class='s'>&quot;nginx.conf.tmpl&quot;</span>
+<span class='lineno'>6</span> <span class='na'>dest</span>        <span class='o'>=</span> <span class='s'>&quot;/etc/nginx/sites-enabled/app.conf&quot;</span>
+<span class='lineno'>7</span> <span class='na'>check_cmd</span>   <span class='o'>=</span> <span class='s'>&quot;/usr/sbin/nginx -t -c /etc/nginx/nginx.conf&quot;</span>
+<span class='lineno'>8</span> <span class='na'>reload_cmd</span>  <span class='o'>=</span> <span class='s'>&quot;/usr/sbin/service nginx reload&quot;</span>
+</code></pre></div>
+<p>This configuration file tells confd to keep an eye on the <code>/app/server</code> etcd key, which we&#8217;ve used above to register the Sinatra services on. If there is an update to one of the watched keys, the <code>src</code> template is parsed again and stored to <code>dest</code>, and <code>reload_cmd</code> gets called. This effectively reloads nginx to look at the currently active upstream Sinatra services.</p>
+
+<p>Once confd has done the initial update of the <code>nginx.conf</code> file, <code>boot.sh</code> starts confd in the background with an interval of 10 seconds:</p>
+<div class='highlight'><pre><code class='bash'>confd -interval 10 -node <span class='nv'>$ETCD</span> -config-file /etc/confd/conf.d/nginx.toml &amp;
+</code></pre></div>
+<p>Every 10 seconds confd will check if there have been changes to the <code>/app/server</code> etcd key. If so, it will trigger an update of the nginx configuration file and reload nginx.</p>
+
+<h3 id='the_result'>The result</h3>
+
+<p>Now that you&#8217;ve followed all these steps, you should have two Sinatra and one nginx service running on your CoreOS cluster. If you SSH into the machine that runs the nginx container, you should be able to reach the Sinatra containers through nginx with a simple <code>curl localhost</code>. This should output <code>Hello World!</code>. If you run <code>fleetctl journal -f sinatra@5000.service</code> and <code>fleetctl journal -f sinatra@5001.service</code> in two separate terminals, you should see the requests throuh nginx coming in. You should also be able to stop any of the Sinatra services with <code>fleetctl destroy sinatra@&lt;port&gt;.service</code>, and still be able to perform requests through the nginx container on the remaining Sinatra service. Of course this will stop working once you destroy both of the running Sinatra services.</p>
+
+<p>You should also be able to connect to the nginx service from within your normal web browser, using the hostname of the ELB that was created with your CloudFormation run. To get this hostname, log in to the AWS console and open the &#8220;Load Balancers&#8221; section of the EC2 dashboard. Click the ELB called <code>CoreOS-CoreOSELB...</code> and copy/paste the &#8220;A Record&#8221; hostname (next to &#8220;DNS Name&#8221; in the details panel of the ELB) to a new browser tab. That page should also show &#8220;Hello World!&#8221;.</p>
+
+<p>Note that you could now create symlinks to an arbitrary amount of additional Sinatra service files (e.g. <code>sinatra@5002.service</code>, <code>sinatra@5003.service</code>, &#8230;). Starting these additional services should automatically register them in etcd and add them to the collection of nginx upstream servers:</p>
+<div class='highlight'><pre><code class='bash'>UNIT                  STATE   LOAD    ACTIVE  SUB      DESC     MACHINE
+nginx.service         loaded  loaded  active  running  nginx    e70d20cf.../10.88.3.238
+sinatra@5000.service  loaded  loaded  active  running  sinatra  17904170.../10.81.1.90
+sinatra@5001.service  loaded  loaded  active  running  sinatra  17904170.../10.81.1.90
+sinatra@5002.service  loaded  loaded  active  running  sinatra  e70d20cf.../10.88.3.238
+sinatra@5003.service  loaded  loaded  active  running  sinatra  e70d20cf.../10.88.3.238
+sinatra@5004.service  loaded  loaded  active  running  sinatra  e70d20cf.../10.88.3.238
+sinatra@5005.service  loaded  loaded  active  running  sinatra  17904170.../10.81.1.90
+sinatra@5006.service  loaded  loaded  active  running  sinatra  e70d20cf.../10.88.3.238
+sinatra@5007.service  loaded  loaded  active  running  sinatra  e70d20cf.../10.88.3.238
+sinatra@5008.service  loaded  loaded  active  running  sinatra  17904170.../10.81.1.90
+sinatra@5009.service  loaded  loaded  active  running  sinatra  e70d20cf.../10.88.3.238
+sinatra@5010.service  loaded  loaded  active  running  sinatra  e70d20cf.../10.88.3.238
+</code></pre></div>
+<h3 id='conclusion'>Conclusion</h3>
+
+<p>First of all: congratulations for making it this far! This was by far the longest article I&#8217;ve ever written, and researching all this stuff cost me considerably more time than I had expected. It was worth it though, because I&#8217;m extremely impressed by CoreOS and the tooling ecosystem around it. I wouldn&#8217;t be surprised if this is going to be the next big step in setting up highly available and scalable web applications.</p>
+
+<p>This would also be a good place to mention <a href='https://flynn.io'>Flynn</a> and <a href='http://deis.io'>Deis</a>, two projects that aim to solve &#8220;the devops issue&#8221; in ways similar to what you&#8217;ve seen in this post.</p>
+
+<p>Next up for me is trying out Mozilla&#8217;s <a href='http://hekad.readthedocs.org/en/latest/index.html'>heka</a> for aggregated log collection, and Heroku&#8217;s <a href='https://devcenter.heroku.com/articles/buildpacks'>buildpacks</a> to compile and run a full-blown web application in a generic Docker container. I might even blog about this! ;-).</p>
+    </div>
+  </body>
+</html>
