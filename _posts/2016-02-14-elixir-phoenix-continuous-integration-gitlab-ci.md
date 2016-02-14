@@ -1,6 +1,6 @@
 ---
 layout: post
-title: Elixir and Phoenix: continuous integration on Gitlab CI
+title: "Elixir and Phoenix: continuous integration on Gitlab CI"
 ---
 
 Recently I was introduced to [Elixir](http://elixir-lang.org/) and [Phoenix](http://www.phoenixframework.org/) (thanks [@smeevil](https://twitter.com/smeevil)) and I've been playing around with that for the last few days. The functional programming takes some getting used to, but the quality of the tools and documentation are astounding and it's lots of fun to write a web application with Phoenix.
@@ -17,7 +17,7 @@ To run your tests on Gitlab CI, you'll need a `.gitlab-ci.yml` file in the root 
 
 I'm using the [Docker runner](http://doc.gitlab.com/ce/ci/docker/using_docker_images.html) to run my tests locally. This is my `.gitlab-ci.yml`:
 
-```yaml
+{% highlight yaml %}
 image: "marceldegraaf/elixir"
 services:
   - "postgres:latest"
@@ -49,7 +49,7 @@ job:
     paths:
       - "_build"
       - "deps"
-```
+{% endhighlight %}
 
 The `marceldegraaf/elixir` image contains an Erlang VM with Elixir pre-installed, and also comes with PhantomJS to make testing with Hound possible.
 
@@ -57,7 +57,7 @@ As you can see, in the `before_script` section we first start PhantomJS in webdr
 
 To run integration tests I'm using Hound, using the PhantomJS driver. I've added a `test/integration` folder to my Phoenix project. A simple home page integration test could look like this:
 
-```elixir
+{% highlight elixir %}
 defmodule Shop.HomePageTest do
   use ExUnit.Case
   use Hound.Helpers
@@ -70,13 +70,13 @@ defmodule Shop.HomePageTest do
     assert find_element(:tag, "h1") |> inner_html == "Welcome to our shop"
   end
 end
-```
+{% endhighlight %}
 
 To make sure Hound uses the PhantomJS webdriver, I've added this to my `config/test.exs` file:
 
-```elixir
+{% highlight elixir %}
 config :hound,
   driver: "phantomjs"
-```
+{% endhighlight %}
 
 If you run these tests locally, make sure to start PhantomJS before running `mix test`, or Hound will trow errors for not being able to reach the webdriver.
